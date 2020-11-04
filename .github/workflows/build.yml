@@ -30,4 +30,4 @@ jobs:
 
       # Runs a set of commands using the runners shell
       - name: Create OS files
-        run: build.sh
+        run: ./build.sh
