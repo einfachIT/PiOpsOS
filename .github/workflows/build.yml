@@ -42,6 +42,7 @@ jobs:
   deploy:
     if: github.ref == 'refs/tags/*'
     needs: build
+    runs-on: ubuntu-latest
     steps:
       # Deploy artefacts
       - name: Deploy
