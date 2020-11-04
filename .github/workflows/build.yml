@@ -34,7 +34,7 @@ jobs:
 
       - uses: actions/upload-artifact@v2
         with:
-          name: my-artifact
+          name: raspios_64_noobs
           path: |
             boot.tar.xz
             root.tar.xz
