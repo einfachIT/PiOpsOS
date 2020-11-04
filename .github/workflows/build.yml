@@ -36,8 +36,11 @@ jobs:
         with:
           name: my-artifact
           path: |
-            *.json
-            *.xz
+            boot.tar.xz
+            root.tar.xz
+            os.json
+            partitions.json
+            partition_setup.sh
   
   deploy:
     if: github.ref == 'refs/tags/*'
