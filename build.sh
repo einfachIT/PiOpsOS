@@ -2,9 +2,9 @@
 
 path=$(pwd)
 
-# curl -L http://downloads.raspberrypi.org/raspios_arm64/images/raspios_arm64-2020-08-24/2020-08-20-raspios-buster-arm64.zip --output raspios-buster-arm64.zip
+curl -L http://downloads.raspberrypi.org/raspios_arm64/images/raspios_arm64-2020-08-24/2020-08-20-raspios-buster-arm64.zip --output raspios-buster-arm64.zip
 
-# unzip raspios-buster-arm64.zip
+unzip raspios-buster-arm64.zip
 
 boot_size=$(sudo parted  2020-08-20-raspios-buster-arm64.img  -s print | grep fat32 | tr -s [:blank:] | cut -d " " -f4)
 root_size=$(sudo parted  2020-08-20-raspios-buster-arm64.img  -s print | grep ext4 | tr -s [:blank:] | cut -d " " -f4)
@@ -13,33 +13,32 @@ echo boot_size=$boot_size
 
 sudo kpartx -av 2020-08-20-raspios-buster-arm64.img
 
-sudo mkdir /media/PI_BOOT
-sudo mount /dev/mapper/loop0p1 /media/PI_BOOT/
-cd /media/PI_BOOT/
-sudo bsdtar --numeric-owner --format gnutar -cpf /tmp/boot.tar .
-boot_tarball_size=$(ls /tmp/boot.tar -l --block-size=1MB |  tr -s [:blank:] | cut -d " " -f5)
+sudo mkdir PI_BOOT
+sudo mount /dev/mapper/loop0p1 PI_BOOT/
+cd PI_BOOT/
+sudo bsdtar --numeric-owner --format gnutar -cpf ../boot.tar .
+boot_tarball_size=$(ls ../boot.tar -l --block-size=1MB |  tr -s [:blank:] | cut -d " " -f5)
 echo boot_tarball_size=$boot_tarball_size
-sudo xz -9 -e /tmp/boot.tar
-boot_sha256sum=$(sha256sum -z /tmp/boot.tar.xz | cut -d " " -f1)
 cd ..
-sudo umount /media/PI_BOOT/
-sudo rm -rf /media/PI_BOOT/
+sudo xz -9 -e boot.tar
+boot_sha256sum=$(sha256sum -z boot.tar.xz | cut -d " " -f1)
+sudo umount PI_BOOT/
+sudo rm -rf PI_BOOT/
 
 echo starting root ...
 
-sudo mkdir /media/PI_ROOT
-sudo mount /dev/mapper/loop0p2 /media/PI_ROOT/
-cd /media/PI_ROOT/
-sudo bsdtar --numeric-owner --format gnutar --one-file-system -cpf /tmp/root.tar .
-root_tarball_size=$(ls /tmp/root.tar -l --block-size=1MB |  tr -s [:blank:] | cut -d " " -f5)
+sudo mkdir PI_ROOT
+sudo mount /dev/mapper/loop0p2 PI_ROOT/
+cd PI_ROOT/
+sudo bsdtar --numeric-owner --format gnutar --one-file-system -cpf ../root.tar .
+root_tarball_size=$(ls ../root.tar -l --block-size=1MB |  tr -s [:blank:] | cut -d " " -f5)
 echo root_tarball_size=$root_tarball_size
-sudo xz -9 -e /tmp/root.tar
-root_sha256sum=$(sha256sum -z /tmp/root.tar.xz | cut -d " " -f1)
 cd ..
+sudo xz -9 -e root.tar
+root_sha256sum=$(sha256sum -z root.tar.xz | cut -d " " -f1)
 sudo umount /media/PI_ROOT/
 sudo rm -rf /media/PI_ROOT/
 
-cd $path
 sleep 1
 
 sudo kpartx -dv  2020-08-20-raspios-buster-arm64.img 
