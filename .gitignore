@@ -2,3 +2,4 @@ partitions.json
 os.json
 *.img
 *.zip
+*.bak

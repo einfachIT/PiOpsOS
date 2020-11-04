@@ -9,6 +9,9 @@ on:
     branches: [ main ]
   pull_request:
     branches: [ main ]
+  create:
+    tags:
+      - *
 
 # A workflow run is made up of one or more jobs that can run sequentially or in parallel
 jobs:
@@ -31,3 +34,19 @@ jobs:
       # Runs a set of commands using the runners shell
       - name: Create OS files
         run: ./build.sh
+
+      - uses: actions/upload-artifact@v2
+        with:
+          name: my-artifact
+          path: |
+            *.json
+            *.xz
+  
+  deploy:
+    if: github.ref == 'refs/tags/*'
+    needs: build
+    steps:
+      # Deploy artefacts
+      - name: Deploy
+        run: ./publish.sh
+        
