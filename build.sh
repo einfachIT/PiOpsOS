@@ -2,8 +2,6 @@
 
 path=$(pwd)
 
-sudo apt-get install -y kpartx
-
 curl -L http://downloads.raspberrypi.org/raspios_arm64/images/raspios_arm64-2020-08-24/2020-08-20-raspios-buster-arm64.zip --output raspios-buster-arm64.zip
 
 unzip raspios-buster-arm64.zip
