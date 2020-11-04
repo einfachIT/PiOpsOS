@@ -36,8 +36,8 @@ echo root_tarball_size=$root_tarball_size
 cd ..
 sudo xz -9 -e root.tar
 root_sha256sum=$(sha256sum root.tar.xz | cut -d " " -f1)
-sudo umount /media/PI_ROOT/
-sudo rm -rf /media/PI_ROOT/
+sudo umount PI_ROOT/
+sudo rm -rf PI_ROOT/
 
 sleep 1
 
