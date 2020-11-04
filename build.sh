@@ -21,7 +21,7 @@ boot_tarball_size=$(ls ../boot.tar -l --block-size=1MB |  tr -s [:blank:] | cut 
 echo boot_tarball_size=$boot_tarball_size
 cd ..
 sudo xz -9 -e boot.tar
-boot_sha256sum=$(sha256sum -z boot.tar.xz | cut -d " " -f1)
+boot_sha256sum=$(sha256sum boot.tar.xz | cut -d " " -f1)
 sudo umount PI_BOOT/
 sudo rm -rf PI_BOOT/
 
@@ -35,7 +35,7 @@ root_tarball_size=$(ls ../root.tar -l --block-size=1MB |  tr -s [:blank:] | cut 
 echo root_tarball_size=$root_tarball_size
 cd ..
 sudo xz -9 -e root.tar
-root_sha256sum=$(sha256sum -z root.tar.xz | cut -d " " -f1)
+root_sha256sum=$(sha256sum root.tar.xz | cut -d " " -f1)
 sudo umount /media/PI_ROOT/
 sudo rm -rf /media/PI_ROOT/
 
