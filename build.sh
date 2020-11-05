@@ -9,9 +9,9 @@ unzip raspios-buster-arm64.zip
 boot_size=$(sudo parted  2020-08-20-raspios-buster-arm64.img  -s print | grep fat32 | tr -s [:blank:] | cut -d " " -f4)
 boot_size=${boot_size%??} # remove last two chars = MB
 root_size=$(sudo parted  2020-08-20-raspios-buster-arm64.img  -s print | grep ext4 | tr -s [:blank:] | cut -d " " -f4)
-root_size=${boot_size%??} # remove last two chars = MB
-echo root_size=$root_size
+root_size=${root_size%??} # remove last two chars = MB
 echo boot_size=$boot_size
+echo root_size=$root_size
 
 sudo kpartx -av 2020-08-20-raspios-buster-arm64.img
 
