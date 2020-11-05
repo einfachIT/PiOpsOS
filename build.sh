@@ -7,7 +7,9 @@ curl -L http://downloads.raspberrypi.org/raspios_arm64/images/raspios_arm64-2020
 unzip raspios-buster-arm64.zip
 
 boot_size=$(sudo parted  2020-08-20-raspios-buster-arm64.img  -s print | grep fat32 | tr -s [:blank:] | cut -d " " -f4)
+boot_size=${boot_size%??} # remove last two chars = MB
 root_size=$(sudo parted  2020-08-20-raspios-buster-arm64.img  -s print | grep ext4 | tr -s [:blank:] | cut -d " " -f4)
+root_size=${boot_size%??} # remove last two chars = MB
 echo root_size=$root_size
 echo boot_size=$boot_size
 
