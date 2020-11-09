@@ -41,5 +41,12 @@ jobs:
     steps:
       # Deploy artefacts
       - name: Deploy
-        run: ./publish.sh
-        
+        run: |
+          mvn deploy:deploy-file \
+            -DgroupId=einfachit \
+            -DartifactId=epicpios \
+            -Dversion=${GITHUB_REF#refs/tags/} \
+            -Dpackaging=zip \
+            -Dfile=noobs.zip \
+            -Durl=https://maven.pkg.github.com/einfachIT/epicPiOS/ \
+            -Dtoken=${{ secrets.GITHUB_TOKEN }}
