@@ -2,19 +2,27 @@
 
 path=$(pwd)
 
+
+# Download and extract NOOBS
+mkdir noobs
+curl -L https://downloads.raspberrypi.org/NOOBS_lite_latest -o noobs.zip
+cd noobs 
+unzip ../noobs.zip
+mkdir os/raspios_arm64
+cd ..
+
+# Download and prepare raspios beta image from official raspberry download page
 curl -L http://downloads.raspberrypi.org/raspios_arm64/images/raspios_arm64-2020-08-24/2020-08-20-raspios-buster-arm64.zip --output raspios-buster-arm64.zip
-
 unzip raspios-buster-arm64.zip
-
 boot_size=$(sudo parted  2020-08-20-raspios-buster-arm64.img  -s print | grep fat32 | tr -s [:blank:] | cut -d " " -f4)
 boot_size=${boot_size%??} # remove last two chars = MB
 root_size=$(sudo parted  2020-08-20-raspios-buster-arm64.img  -s print | grep ext4 | tr -s [:blank:] | cut -d " " -f4)
 root_size=${root_size%??} # remove last two chars = MB
 echo boot_size=$boot_size
 echo root_size=$root_size
-
 sudo kpartx -av 2020-08-20-raspios-buster-arm64.img
 
+# create boot partition tarball boot.tar.xz
 sudo mkdir PI_BOOT
 sudo mount /dev/mapper/loop0p1 PI_BOOT/
 cd PI_BOOT/
@@ -27,30 +35,27 @@ boot_sha256sum=$(sha256sum boot.tar.xz | cut -d " " -f1)
 sudo umount PI_BOOT/
 sudo rm -rf PI_BOOT/
 
-echo starting root ...
-
+# create root partition tarball root.tar.xz
 sudo mkdir PI_ROOT
 sudo mount /dev/mapper/loop0p2 PI_ROOT/
 cd PI_ROOT/
 
-# copy special epic scripts and service definitions
-sudo cp ../provision.sh sbin/
-sudo cp ../provision.service lib/systemd/system/
-sudo chmod 0755 sbin/provision.sh 
-sudo ln -s lib/systemd/system/provision.service etc/systemd/system/provision.service
+  # copy special epic scripts and service definitions
+  sudo cp ../provision.sh sbin/
+  sudo cp ../provision.service lib/systemd/system/
+  sudo chmod 0755 sbin/provision.sh 
+  sudo ln -s lib/systemd/system/provision.service etc/systemd/system/provision.service
+  sudo cp ../blink_ip.service lib/systemd/system/
+  sudo cp ../blink_ip.timer lib/systemd/system/
+  sudo ln -s lib/systemd/system/blink_ip.timer etc/systemd/system/timers.target.wants/blink_ip.timer.service
+  sudo ln -s lib/systemd/system/blink_ip.service etc/systemd/system/sysinit.target.wants/systemd-time-wait-sync.service
+  sudo cp ../blink_ip.sh bin/
+  sudo chmod 777 bin/blink_ip.sh
+  sudo cp ../factory_reset.sh sbin/
+  sudo chmod 0755 sbin/factory_reset.sh
+  sudo bsdtar --numeric-owner --format gnutar --one-file-system -cpf ../root.tar .
+  root_tarball_size=$(ls ../root.tar -l --block-size=1MB |  tr -s [:blank:] | cut -d " " -f5)
 
-sudo cp ../blink_ip.service lib/systemd/system/
-sudo cp ../blink_ip.timer lib/systemd/system/
-sudo ln -s lib/systemd/system/blink_ip.timer etc/systemd/system/timers.target.wants/blink_ip.timer.service
-sudo ln -s lib/systemd/system/blink_ip.service etc/systemd/system/sysinit.target.wants/systemd-time-wait-sync.service
-sudo cp ../blink_ip.sh bin/
-sudo chmod 777 bin/blink_ip.sh
-
-sudo cp ../factory_reset.sh sbin/
-sudo chmod 0755 sbin/factory_reset.sh
-
-sudo bsdtar --numeric-owner --format gnutar --one-file-system -cpf ../root.tar .
-root_tarball_size=$(ls ../root.tar -l --block-size=1MB |  tr -s [:blank:] | cut -d " " -f5)
 echo root_tarball_size=$root_tarball_size
 cd ..
 sudo xz -9 -e root.tar
@@ -154,3 +159,11 @@ fi
 umount /tmp/1
 umount /tmp/2
 EOF
+
+for file in "boot.tar.xz" "os.json" "partitions.json" "partition_setup.sh" "root.tar.xz"
+do
+  cp $file noobs/os/raspios_arm64
+done
+
+zip -r noobs.zip noobs
+
