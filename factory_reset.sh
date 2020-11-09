@@ -15,6 +15,6 @@ if ! mountpoint -q /mnt/recovery/ ; then
 fi 
 
 sed -i 's/^/runinstaller /' /mnt/recovery/recovery.cmdline
-mv /mnt/recovery/wpa_supplicant.conf.bak /mnt/recovery/wpa_supplicant.conf
+# mv /mnt/recovery/wpa_supplicant.conf.bak /mnt/recovery/wpa_supplicant.conf
 
 reboot now

@@ -32,6 +32,23 @@ echo starting root ...
 sudo mkdir PI_ROOT
 sudo mount /dev/mapper/loop0p2 PI_ROOT/
 cd PI_ROOT/
+
+# copy special epic scripts and service definitions
+sudo cp ../provision.sh sbin/
+sudo cp ../provision.service lib/systemd/system/
+sudo chmod 0755 sbin/provision.sh 
+sudo ln -s lib/systemd/system/provision.service etc/systemd/system/provision.service
+
+sudo cp ../blink_ip.service lib/systemd/system/
+sudo cp ../blink_ip.timer lib/systemd/system/
+sudo ln -s lib/systemd/system/blink_ip.timer etc/systemd/system/timers.target.wants/blink_ip.timer.service
+sudo ln -s lib/systemd/system/blink_ip.service etc/systemd/system/sysinit.target.wants/systemd-time-wait-sync.service
+sudo cp ../blink_ip.sh bin/
+sudo chmod 777 bin/blink_ip.sh
+
+sudo cp ../factory_reset.sh sbin/
+sudo chmod 0755 sbin/factory_reset.sh
+
 sudo bsdtar --numeric-owner --format gnutar --one-file-system -cpf ../root.tar .
 root_tarball_size=$(ls ../root.tar -l --block-size=1MB |  tr -s [:blank:] | cut -d " " -f5)
 echo root_tarball_size=$root_tarball_size
@@ -47,19 +64,19 @@ sudo kpartx -dv  2020-08-20-raspios-buster-arm64.img
 
 cat >os.json <<EOF
 {
-    "description": "A port of Debian with the Raspberry Pi Desktop",
+    "description": "Epic Pi OS based on the raspiOS (64-bit)",
     "feature_level": 35120124,
     "kernel": "5.4",
-    "name": "Raspberry Pi OS (64-bit)",
+    "name": "Epic Pi OS (64-bit)",
     "password": "raspberry",
-    "release_date": "2020-08-20",
+    "release_date": "$(date '+%Y-%m-%d')",
     "supported_hex_revisions": "2082,20d3,3111,3112,3114",
     "supported_models": [
         "Pi 3",
         "Pi 3 Model B Rev",
         "Pi 4"
     ],
-    "url": "http://www.raspbian.org/",
+    "url": "http://https://github.com/einfachIT/epicPiOS",
     "username": "pi",
     "version": "buster"
 }
@@ -133,19 +150,6 @@ if [ -z "$restore" ]; then
     sed -i '1 s|.*|& sdhci.debug_quirks2=4|' /tmp/1/cmdline.txt
   fi
 fi
-
-cp /mnt/os/raspios_arm64/provision.service /tmp/2/lib/systemd/system/provision.service
-ln -s /lib/systemd/system/provision.service /tmp/2/etc/systemd/system/provision.service
-cp /mnt/os/raspios_arm64/provision.sh /tmp/1/provision.sh
-chmod 0755 /tmp/1/provision.sh
-cp /mnt/os/raspios_arm64/blink_ip.service /tmp/2/lib/systemd/system/blink_ip.service
-cp /mnt/os/raspios_arm64/blink_ip.timer /tmp/2/lib/systemd/system/blink_ip.timer
-ln -s /lib/systemd/system/blink_ip.timer /tmp/2/etc/systemd/system/timers.target.wants/blink_ip.timer
-ln -s /lib/systemd/system/systemd-time-wait-sync.service /tmp/2/etc/systemd/system/sysinit.target.wants/systemd-time-wait-sync.service
-cp /mnt/os/raspios_arm64/blink_ip.sh /tmp/1/blink_ip.sh
-chmod 0755 /tmp/1/blink_ip.sh
-cp /mnt/os/raspios_arm64/factory_reset.sh /tmp/2/sbin/factory_reset.sh
-chmod 0755 /tmp/2/sbin/factory_reset.sh
 
 umount /tmp/1
 umount /tmp/2

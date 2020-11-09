@@ -5,3 +5,7 @@ partition_setup.sh
 *.zip
 *.bak
 *.swp
+*.tar
+*.xz
+PI_ROOT
+PI_BOOT
