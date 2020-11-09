@@ -1,0 +1,11 @@
+[Unit]
+Description=Provision Service
+ConditionFileNotEmpty=/boot/provision.sh
+
+[Service]
+ExecStartPre=/bin/sh -c 'until ping -c1 google.com; do sleep 10; done;'
+ExecStart=/boot/provision.sh
+Type=simple
+
+[Install]
+WantedBy=multi-user.target

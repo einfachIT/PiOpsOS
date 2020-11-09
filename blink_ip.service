@@ -1,0 +1,7 @@
+[Unit]
+Description=Blink Onboard led of raspberry to show last digits of ip address
+ConditionFileNotEmpty=/boot/blink_ip.sh
+
+[Service]
+ExecStart=/boot/blink_ip.sh
+Type=simple

@@ -1,0 +1,10 @@
+[Unit]
+Description=runs blink_ip service every ten seconds
+
+[Timer]
+OnBootSec=60sec
+OnUnitActiveSec=10sec
+
+[Install]
+WantedBy=timers.target
+
