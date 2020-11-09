@@ -31,16 +31,6 @@ jobs:
       # Runs a set of commands using the runners shell
       - name: Create OS files
         run: ./build.sh
-
-      - uses: actions/upload-artifact@v2
-        with:
-          name: raspios_64_noobs
-          path: |
-            boot.tar.xz
-            root.tar.xz
-            os.json
-            partitions.json
-            partition_setup.sh
   
   deploy:
     if: github.ref == 'refs/tags/*'
