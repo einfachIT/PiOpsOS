@@ -1,5 +1,7 @@
 partitions.json
 os.json
+partition_setup.sh
 *.img
 *.zip
 *.bak
+*.swp
