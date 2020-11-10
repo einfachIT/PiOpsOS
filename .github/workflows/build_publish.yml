@@ -54,9 +54,6 @@ jobs:
           java-version: 1.8
 
       - name: publish
-        uses: actions/setup-java@v1
-        with:
-          java-version: 1.8
         run: |
           mvn --settings settings.xml deploy:deploy-file \
             -DgroupId=einfachit \
