@@ -45,11 +45,11 @@ cd PI_ROOT/
   sudo cp ../provision.sh sbin/provision.sh
   sudo cp ../provision.service lib/systemd/system/provision.service
   sudo chmod 0755 sbin/provision.sh 
-  sudo ln -s lib/systemd/system/provision.service etc/systemd/system/provision.service
+  sudo ln -s /lib/systemd/system/provision.service etc/systemd/system/provision.service
   sudo cp ../blink_ip.service lib/systemd/system/blink_ip.service
   sudo cp ../blink_ip.timer lib/systemd/system/blink_ip.timer
-  sudo ln -s lib/systemd/system/blink_ip.timer etc/systemd/system/timers.target.wants/blink_ip.timer.service
-  sudo ln -s lib/systemd/system/blink_ip.service etc/systemd/system/sysinit.target.wants/systemd-time-wait-sync.service
+  sudo ln -s /lib/systemd/system/blink_ip.timer etc/systemd/system/timers.target.wants/blink_ip.timer.timer
+  sudo ln -s /lib/systemd/system/blink_ip.service etc/systemd/system/sysinit.target.wants/blink_ip.service
   sudo cp ../blink_ip.sh bin/blink_ip.sh
   sudo chmod 777 bin/blink_ip.sh
   sudo cp ../factory_reset.sh sbin/factory_reset.sh
