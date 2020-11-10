@@ -57,7 +57,7 @@ jobs:
 
       - name: publish
         run: |
-          mvn --settings settings.xml deploy:deploy-file \
+          mvn deploy:deploy-file \
             -DgroupId=einfachit \
             -DartifactId=epicpios \
             -Dversion=${GITHUB_REF#refs/tags/} \
