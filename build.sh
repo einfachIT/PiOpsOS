@@ -8,6 +8,7 @@ mkdir noobs
 curl -L https://downloads.raspberrypi.org/NOOBS_lite_latest -o noobs.zip
 cd noobs 
 unzip ../noobs.zip
+sed -i 's/$/ silentinstall/' recovery.cmdline
 mkdir os/raspios_arm64
 cd ..
 
@@ -118,15 +119,15 @@ cat >partition_setup.sh <<EOF
 set -ex
 
 # shellcheck disable=SC2154
-if [ -z "$part1" ] || [ -z "$part2" ]; then
-  printf "Error: missing environment variable part1 or part2n" 1>&2
+if [ -z "\$part1" ] || [ -z "\$part2" ]; then
+  printf "Error: missing environment variable part1 or part2\n" 1>&2
   exit 1
 fi
 
 mkdir -p /tmp/1 /tmp/2
 
-mount "$part1" /tmp/1
-mount "$part2" /tmp/2
+mount "\$part1" /tmp/1
+mount "\$part2" /tmp/2
 
 sed /tmp/1/cmdline.txt -i -e "s|root=[^ ]*|root=${part2}|"
 sed /tmp/2/etc/fstab -i -e "s|^[^#].* / |${part2}  / |"
