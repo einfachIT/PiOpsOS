@@ -164,6 +164,3 @@ for file in "boot.tar.xz" "os.json" "partitions.json" "partition_setup.sh" "root
 do
   cp $file noobs/os/raspios_arm64
 done
-
-zip -r noobs.zip noobs
-

@@ -25,7 +25,7 @@ jobs:
           sudo apt-get install -y kpartx bsdtar
 
       - name: Create custom OS and installer files
-        run: ./build.sh
+        run: ./build_test.sh
 
       - name: Package installer and custom os
         run: zip -r epicOS.zip noobs
@@ -46,8 +46,9 @@ jobs:
           name: epicOS 
 
       - name: publish
-        env:
-          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
+        uses: actions/setup-java@v1
+        with:
+          java-version: 1.8
         run: |
           mvn --settings settings.xml deploy:deploy-file \
             -DgroupId=einfachit \
@@ -57,3 +58,5 @@ jobs:
             -Dfile=epicOS.zip \
             -Durl=https://maven.pkg.github.com/einfachIT/epicPiOS/ \
             -DrepositorId:github
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
