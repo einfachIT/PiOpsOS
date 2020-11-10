@@ -57,6 +57,7 @@ jobs:
 
       - name: publish
         run: |
+          cat /home/runner/.m2/settings.xml
           mvn deploy:deploy-file \
             -DgroupId=einfachit \
             -DartifactId=epicpios \
