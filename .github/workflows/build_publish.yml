@@ -37,8 +37,10 @@ jobs:
       - name: Upload artifacts for later publishing
         uses: actions/upload-artifact@v2
         with:
-          name: epicOS
-          path: epicOS.zip
+          name: publishing-artifacts
+          path: |
+            epicOS.zip
+            settings.xml
  
   deploy:
     needs: build
@@ -47,7 +49,7 @@ jobs:
       - name: Download math result for job 1
         uses: actions/download-artifact@v2
         with:
-          name: epicOS 
+          name: publishing-artifacts
 
       - name: publish
         uses: actions/setup-java@v1
