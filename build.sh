@@ -41,17 +41,17 @@ sudo mount /dev/mapper/loop0p2 PI_ROOT/
 cd PI_ROOT/
 
   # copy special epic scripts and service definitions
-  sudo cp ../provision.sh sbin/
-  sudo cp ../provision.service lib/systemd/system/
+  sudo cp ../provision.sh sbin/provision.sh
+  sudo cp ../provision.service lib/systemd/system/provision.service
   sudo chmod 0755 sbin/provision.sh 
   sudo ln -s lib/systemd/system/provision.service etc/systemd/system/provision.service
-  sudo cp ../blink_ip.service lib/systemd/system/
-  sudo cp ../blink_ip.timer lib/systemd/system/
+  sudo cp ../blink_ip.service lib/systemd/system/blink_ip.service
+  sudo cp ../blink_ip.timer lib/systemd/system/blink_ip.timer
   sudo ln -s lib/systemd/system/blink_ip.timer etc/systemd/system/timers.target.wants/blink_ip.timer.service
   sudo ln -s lib/systemd/system/blink_ip.service etc/systemd/system/sysinit.target.wants/systemd-time-wait-sync.service
-  sudo cp ../blink_ip.sh bin/
+  sudo cp ../blink_ip.sh bin/blink_ip.sh
   sudo chmod 777 bin/blink_ip.sh
-  sudo cp ../factory_reset.sh sbin/
+  sudo cp ../factory_reset.sh sbin/factory_reset.sh
   sudo chmod 0755 sbin/factory_reset.sh
   sudo bsdtar --numeric-owner --format gnutar --one-file-system -cpf ../root.tar .
   root_tarball_size=$(ls ../root.tar -l --block-size=1MB |  tr -s [:blank:] | cut -d " " -f5)

@@ -31,3 +31,13 @@ jobs:
       # Runs a set of commands using the runners shell
       - name: Create OS files
         run: ./build.sh
+
+      # Create Zip file
+      - name: Create Package
+        run: ./package.sh
+
+      - name: Upload artifacts for later publishing
+        uses: actions/upload-artifact@v2
+        with:
+          name: publishing-artifact
+          path: epicPiOS_64.zip

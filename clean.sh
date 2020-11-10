@@ -1,4 +1,11 @@
 #!/bin/bash
+sudo umount PI_BOOT
+sudo umount PI_ROOT
+rm -rf PI_BOOT
+rm -rf PI_ROOT
 
-# delete all artifacts
-rm raspios_arm64.zip boot.tar.xz root.tar.xz os.json partitions.json partition_setup.sh provision.service provision.sh blink_ip.sh blink_ip.service blink_ip.timer factory_reset.sh noobs.zip 2020-08-20-raspios-buster-arm64.img
+for file in "boot.tar.xz" "boot.tar" "os.json" "partitions.json" "partition_setup.sh" "root.tar.xz" "root.tar" "2020-08-20-raspios-buster-arm64.img" "noobs" "noobs.zip" "raspios-buster-arm64.zip"
+do
+  rm -rf $file
+done
+
