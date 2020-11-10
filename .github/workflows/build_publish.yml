@@ -40,7 +40,6 @@ jobs:
           name: publishing-artifacts
           path: |
             epicOS.zip
-            settings.xml
  
   deploy:
     needs: build
