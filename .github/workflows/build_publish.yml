@@ -20,28 +20,38 @@ jobs:
       # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
       - uses: actions/checkout@v2
 
-      # Runs a single command using the runners shell
       - name: Prepare build
         run: |
           sudo apt-get install -y kpartx bsdtar
-          ls
 
-      # Runs a set of commands using the runners shell
-      - name: Create OS files
+      - name: Create custom OS and installer files
         run: ./build.sh
-  
+
+      - name: Package installer and custom os
+        run: zip -r epicOS.zip noobs
+
+      - name: Upload artifacts for later publishing
+        uses: actions/upload-artifact@v2
+        with:
+          name: epicOS
+          path: epicOS.zip
+ 
   deploy:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      # Deploy artefacts
-      - name: Deploy
+      - name: Download math result for job 1
+        uses: actions/download-artifact@v2
+        with:
+          name: epicOS 
+
+      - name: publish
         run: |
           mvn deploy:deploy-file \
             -DgroupId=einfachit \
             -DartifactId=epicpios \
             -Dversion=${GITHUB_REF#refs/tags/} \
             -Dpackaging=zip \
-            -Dfile=noobs.zip \
+            -Dfile=epicOS.zip \
             -Durl=https://maven.pkg.github.com/einfachIT/epicPiOS/ \
             -Dtoken=${{ secrets.GITHUB_TOKEN }}
