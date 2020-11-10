@@ -46,12 +46,14 @@ jobs:
           name: epicOS 
 
       - name: publish
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
         run: |
-          mvn deploy:deploy-file \
+          mvn --settings settings.xml deploy:deploy-file \
             -DgroupId=einfachit \
             -DartifactId=epicpios \
             -Dversion=${GITHUB_REF#refs/tags/} \
             -Dpackaging=zip \
             -Dfile=epicOS.zip \
             -Durl=https://maven.pkg.github.com/einfachIT/epicPiOS/ \
-            -Dtoken=${{ secrets.GITHUB_TOKEN }}
+            -DrepositorId:github
