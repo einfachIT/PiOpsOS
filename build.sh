@@ -129,12 +129,12 @@ mkdir -p /tmp/1 /tmp/2
 mount "\$part1" /tmp/1
 mount "\$part2" /tmp/2
 
-sed /tmp/1/cmdline.txt -i -e "s|root=[^ ]*|root=${part2}|"
-sed /tmp/2/etc/fstab -i -e "s|^[^#].* / |${part2}  / |"
-sed /tmp/2/etc/fstab -i -e "s|^[^#].* /boot |${part1}  /boot |"
+sed /tmp/1/cmdline.txt -i -e "s|root=[^ ]*|root=\${part2}|"
+sed /tmp/2/etc/fstab -i -e "s|^[^#].* / |\${part2}  / |"
+sed /tmp/2/etc/fstab -i -e "s|^[^#].* /boot |\${part1}  /boot |"
 
 # shellcheck disable=SC2154
-if [ -z "$restore" ]; then
+if [ -z "\$restore" ]; then
   if [ -f /mnt/ssh ]; then
     cp /mnt/ssh /tmp/1/
   fi
