@@ -1,9 +1,8 @@
 [Unit]
-Description=runs provision service weekly
+Description=kicks provision service after boot
 
 [Timer]
-OnCalendar=weekly
-Persistent=true
+OnBootSec=10
 
 [Install]
 WantedBy=timers.target

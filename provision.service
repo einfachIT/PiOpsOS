@@ -5,5 +5,5 @@ ConditionFileNotEmpty=/sbin/provision.sh
 [Service]
 ExecStartPre=/bin/sh -c 'until ping -c1 google.com; do sleep 10; done;'
 ExecStart=/sbin/provision.sh
+ExecStop=mv provision.sh /sbin/update.sh
 Type=oneshot
-
