@@ -51,7 +51,7 @@ cd PI_ROOT/
   sudo ln -s /lib/systemd/system/blink_ip.timer /etc/systemd/system/timers.target.wants/blink_ip.timer.timer
   sudo ln -s /lib/systemd/system/blink_ip.service /etc/systemd/system/sysinit.target.wants/blink_ip.service
   sudo cp ../blink_ip.sh sbin/blink_ip.sh
-  sudo chmod 0755 bin/blink_ip.sh
+  sudo chmod 0755 sbin/blink_ip.sh
   sudo cp ../factory_reset.sh sbin/factory_reset.sh
   sudo chmod 0755 sbin/factory_reset.sh
   sudo bsdtar --numeric-owner --format gnutar --one-file-system -cpf ../root.tar .
