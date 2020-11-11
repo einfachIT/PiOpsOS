@@ -1,8 +1,10 @@
 [Unit]
 Description=kicks provision service after boot
+Wants=network-online.target
+After=network-online.target
 
 [Timer]
-OnBootSec=10
+OnBootSec=60
 
 [Install]
 WantedBy=timers.target
