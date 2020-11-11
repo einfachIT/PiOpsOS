@@ -1,5 +1,7 @@
 [Unit]
 Description=runs blink_ip service every ten seconds
+Wants=network-online.target
+After=network-online.target
 
 [Timer]
 OnBootSec=60sec
