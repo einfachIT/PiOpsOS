@@ -1,9 +1,9 @@
 [Unit]
-Description=runs provision service every week
+Description=runs provision service weekly
 
 [Timer]
-OnBootSec=60sec
-OnUnitActiveSec=1w
+OnCalendar=weekly
+Persistent=true
 
 [Install]
 WantedBy=timers.target
