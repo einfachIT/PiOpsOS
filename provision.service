@@ -1,8 +1,12 @@
 [Unit]
 Description=Provision Service
 ConditionFileNotEmpty=/sbin/provision.sh
+StartLimitIntervalSec=200
+StartLimitBurst=5
 
 [Service]
 ExecStartPre=/bin/sh -c 'until ping -c1 google.com; do sleep 10; done;'
 ExecStart=/sbin/provision.sh
+Restart=on-failure
+RestartSec=30
 Type=simple
