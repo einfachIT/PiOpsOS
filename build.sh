@@ -179,15 +179,3 @@ for file in "boot.tar.xz" "os.json" "partitions.json" "partition_setup.sh" "root
 do
   cp $file noobs/os/raspios_arm64
 done
-
-cat >/noobs/wpa_supplicant.conf <<EOF
-ctrl_interface=DIR=/var/run/wpa_supplicant GROUP=netdev
-update_config=1
-country=CH
-
-network={
-        ssid="scratch"
-        psk="8962scratch"
-        key_mgmt=WPA_PSK
-}
-EOF
