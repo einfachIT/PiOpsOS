@@ -3,9 +3,9 @@
 dl_url="http://downloads.raspberrypi.org/raspios_lite_arm64/images/raspios_lite_arm64-2020-08-24/2020-08-20-raspios-buster-arm64-lite.zip"
 
 # Download and extract NOOBS
-mkdir noobs
+mkdir epicPiOS 
 curl -L https://downloads.raspberrypi.org/NOOBS_lite_latest -o noobs.zip
-cd noobs 
+cd epicPiOS 
 unzip ../noobs.zip
 sed -i 's/$/ silentinstall/' recovery.cmdline
 mkdir os/raspios_arm64
@@ -169,5 +169,5 @@ EOF
 
 for file in "boot.tar.xz" "os.json" "partitions.json" "partition_setup.sh" "root.tar.xz"
 do
-  cp $file noobs/os/raspios_$flavor
+  cp $file epicPiOS/os/raspios_$flavor
 done
