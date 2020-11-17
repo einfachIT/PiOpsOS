@@ -1,7 +1,6 @@
 #!/bin/bash
 
-path=$(pwd)
-flavor="arm64"
+dl_url="http://downloads.raspberrypi.org/raspios_lite_arm64/images/raspios_lite_arm64-2020-08-24/2020-08-20-raspios-buster-arm64-lite.zip"
 
 # Download and extract NOOBS
 mkdir noobs
@@ -14,15 +13,18 @@ EOF
 cd ..
 
 # Download and prepare raspios beta image from official raspberry download page
-curl -L http://downloads.raspberrypi.org/raspios_arm64/images/raspios_arm64-2020-08-24/2020-08-20-raspios-buster-$flavor.zip --output raspios-buster-$flavor.zip
-unzip raspios-buster-$flavor.zip
-boot_size=$(sudo parted  2020-08-20-raspios-buster-$flavor.img  -s print | grep fat32 | tr -s [:blank:] | cut -d " " -f4)
+curl -L $dl_url --output raspios.zip
+
+unzip raspios.zip
+mv "$(unzip -Z1 raspios.zip)" raspios.img
+
+boot_size=$(sudo parted  raspios.img  -s print | grep fat32 | tr -s [:blank:] | cut -d " " -f4)
 boot_size=${boot_size%??} # remove last two chars = MB
-root_size=$(sudo parted  2020-08-20-raspios-buster-$flavor.img  -s print | grep ext4 | tr -s [:blank:] | cut -d " " -f4)
+root_size=$(sudo parted  raspios.img  -s print | grep ext4 | tr -s [:blank:] | cut -d " " -f4)
 root_size=${root_size%??} # remove last two chars = MB
 echo boot_size=$boot_size
 echo root_size=$root_size
-sudo kpartx -av 2020-08-20-raspios-buster-$flavor.img
+sudo kpartx -av raspios.img
 
 # create boot partition tarball boot.tar.xz
 sudo mkdir PI_BOOT
@@ -70,7 +72,7 @@ sudo rm -rf PI_ROOT/
 
 sleep 1
 
-sudo kpartx -dv  2020-08-20-raspios-buster-$flavor.img 
+sudo kpartx -dv  raspios.img 
 
 cat >os.json <<EOF
 {
