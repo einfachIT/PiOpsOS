@@ -2,13 +2,9 @@
 
 name: CI
 
-# Controls when the action will run. Triggers the workflow on push or pull request
-# events but only for the main branch
 on:
-  push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
+  release:
+    types: [published]
 
 # A workflow run is made up of one or more jobs that can run sequentially or in parallel
 jobs:
@@ -39,5 +35,6 @@ jobs:
       - name: Upload artifacts for later publishing
         uses: actions/upload-artifact@v2
         with:
-          name: publishing-artifact
+          name: epicPiOS_${{ github.event.release.tag_name }}
           path: epicPiOS_64.zip
+        
