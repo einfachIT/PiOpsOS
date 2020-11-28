@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/bash -ex
 
 dl_url="http://downloads.raspberrypi.org/raspios_lite_arm64/images/raspios_lite_arm64-2020-08-24/2020-08-20-raspios-buster-arm64-lite.zip"
 
@@ -9,7 +9,6 @@ cd epicPiOS
 unzip ../noobs.zip
 sed -i 's/$/ silentinstall/' recovery.cmdline
 mkdir os/raspios_arm64
-EOF
 cd ..
 
 # Download and prepare raspios beta image from official raspberry download page
