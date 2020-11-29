@@ -8,7 +8,7 @@ curl -L https://downloads.raspberrypi.org/NOOBS_lite_latest -o noobs.zip
 cd epicPiOS 
 unzip ../noobs.zip
 sed -i 's/$/ silentinstall/' recovery.cmdline
-mkdir os/raspios_arm64
+mkdir os/raspios_arm64-lit
 cd ..
 
 # Download and prepare raspios beta image from official raspberry download page
@@ -168,5 +168,5 @@ EOF
 
 for file in "boot.tar.xz" "os.json" "partitions.json" "partition_setup.sh" "root.tar.xz"
 do
-  cp $file epicPiOS/os/raspios_$flavor
+  cp $file epicPiOS/os/raspios_arm64-lite
 done
