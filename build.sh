@@ -8,7 +8,7 @@ curl -L https://downloads.raspberrypi.org/NOOBS_lite_latest -o noobs.zip
 cd epicPiOS 
 unzip ../noobs.zip
 sed -i 's/$/ silentinstall/' recovery.cmdline
-mkdir os/raspios_arm64-lit
+mkdir os/raspios_arm64-lite
 cd ..
 
 # Download and prepare raspios beta image from official raspberry download page
