@@ -44,6 +44,7 @@ sudo mount /dev/mapper/loop0p2 PI_ROOT/
 cd PI_ROOT/
 
   # copy special epic scripts and service definitions
+  sudo cp ../epic.conf etc/epic.conf
   sudo cp ../provision.sh sbin/provision.sh
   sudo cp ../provision.service lib/systemd/system/provision.service
   sudo cp ../update.service lib/systemd/system/update.service
@@ -55,6 +56,9 @@ cd PI_ROOT/
   sudo cp ../blink_ip.sh sbin/blink_ip.sh
   sudo cp ../blink_ip.service lib/systemd/system/blink_ip.service
   sudo cp ../blink_ip.timer lib/systemd/system/blink_ip.timer
+  sudo cp ../ble_ip.sh sbin/ble_ip.sh
+  sudo cp ../ble_ip.service lib/systemd/system/ble_ip.service
+  sudo cp ../ble_ip.timer lib/systemd/system/ble_ip.timer
   sudo ln -s /lib/systemd/system/blink_ip.timer etc/systemd/system/timers.target.wants/blink_ip.timer
   sudo chmod 0755 sbin/blink_ip.sh
   sudo cp ../factory_reset.sh sbin/factory_reset.sh
