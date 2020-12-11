@@ -1,6 +1,6 @@
 #!/bin/bash -ex
 
-dl_url="http://downloads.raspberrypi.org/raspios_arm64/images/raspios_arm64-2020-08-24/2020-08-20-raspios-buster-arm64.zip"
+dl_url="http://downloads.raspberrypi.org/raspios_lite_arm64/images/raspios_lite_arm64-2020-08-24/2020-08-20-raspios-buster-arm64-lite.zip"
 
 # Download and extract NOOBS
 mkdir epicPiOS 
