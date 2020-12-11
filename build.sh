@@ -1,15 +1,14 @@
-#!/bin/bash
+#!/bin/bash -ex
 
 dl_url="http://downloads.raspberrypi.org/raspios_lite_arm64/images/raspios_lite_arm64-2020-08-24/2020-08-20-raspios-buster-arm64-lite.zip"
 
 # Download and extract NOOBS
-mkdir noobs
+mkdir epicPiOS 
 curl -L https://downloads.raspberrypi.org/NOOBS_lite_latest -o noobs.zip
-cd noobs 
+cd epicPiOS 
 unzip ../noobs.zip
 sed -i 's/$/ silentinstall/' recovery.cmdline
-mkdir os/raspios_arm64
-EOF
+mkdir os/raspios_arm64-lite
 cd ..
 
 # Download and prepare raspios beta image from official raspberry download page
@@ -45,6 +44,7 @@ sudo mount /dev/mapper/loop0p2 PI_ROOT/
 cd PI_ROOT/
 
   # copy special epic scripts and service definitions
+  sudo cp ../epic.conf etc/epic.conf
   sudo cp ../provision.sh sbin/provision.sh
   sudo cp ../provision.service lib/systemd/system/provision.service
   sudo cp ../update.service lib/systemd/system/update.service
@@ -56,6 +56,9 @@ cd PI_ROOT/
   sudo cp ../blink_ip.sh sbin/blink_ip.sh
   sudo cp ../blink_ip.service lib/systemd/system/blink_ip.service
   sudo cp ../blink_ip.timer lib/systemd/system/blink_ip.timer
+  sudo cp ../ble_ip.sh sbin/ble_ip.sh
+  sudo cp ../ble_ip.service lib/systemd/system/ble_ip.service
+  sudo cp ../ble_ip.timer lib/systemd/system/ble_ip.timer
   sudo ln -s /lib/systemd/system/blink_ip.timer etc/systemd/system/timers.target.wants/blink_ip.timer
   sudo chmod 0755 sbin/blink_ip.sh
   sudo cp ../factory_reset.sh sbin/factory_reset.sh
@@ -169,5 +172,5 @@ EOF
 
 for file in "boot.tar.xz" "os.json" "partitions.json" "partition_setup.sh" "root.tar.xz"
 do
-  cp $file noobs/os/raspios_$flavor
+  cp $file epicPiOS/os/raspios_arm64-lite
 done

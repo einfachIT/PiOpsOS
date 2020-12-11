@@ -1,4 +1,5 @@
 partitions.json
+epicPiOS
 os.json
 partition_setup.sh
 *.img
