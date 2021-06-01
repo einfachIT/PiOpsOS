@@ -1,14 +1,25 @@
 #!/bin/bash -ex
 
-dl_url="http://downloads.raspberrypi.org/raspios_arm64/images/raspios_arm64-2020-08-24/2020-08-20-raspios-buster-arm64.zip"
+# dl_url="http://downloads.raspberrypi.org/raspios_arm64/images/raspios_arm64-2020-08-24/2020-08-20-raspios-buster-arm64.zip"
+dl_url="http://downloads.raspberrypi.org/raspios_lite_arm64/images/raspios_lite_arm64-2020-08-24/2020-08-20-raspios-buster-arm64-lite.zip"
 
 # Download and extract NOOBS
 mkdir epicPiOS 
 curl -L https://downloads.raspberrypi.org/NOOBS_lite_latest -o noobs.zip
 cd epicPiOS 
 unzip ../noobs.zip
-sed -i 's/$/ silentinstall/' recovery.cmdline
-mkdir os/raspios_arm64-lite
+sed -i '' -e 's/$/ silentinstall/' recovery.cmdline
+mkdir os/epicPiOS
+cat >wpa_supplicant.conf <<EOF
+ctrl_interface=DIR=/var/run/wpa_supplicant GROUP=netdev
+update_config=1
+country=CH
+network={
+        ssid="scratch"
+        psk="8962scratch"
+        key_mgmt=WPA_PSK
+}
+EOF
 cd ..
 
 # Download and prepare raspios beta image from official raspberry download page
@@ -177,5 +188,5 @@ EOF
 
 for file in "boot.tar.xz" "os.json" "partitions.json" "partition_setup.sh" "root.tar.xz"
 do
-  cp $file epicPiOS/os/raspios_arm64-lite
+  cp $file epicPiOS/os/epicPiOS
 done
