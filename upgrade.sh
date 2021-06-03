@@ -3,29 +3,6 @@
 # dl_url="http://downloads.raspberrypi.org/raspios_arm64/images/raspios_arm64-2020-08-24/2020-08-20-raspios-buster-arm64.zip"
 dl_url="http://downloads.raspberrypi.org/raspios_lite_arm64/images/raspios_lite_arm64-2020-08-24/2020-08-20-raspios-buster-arm64-lite.zip"
 
-# Download and extract NOOBS
-mkdir epicPiOS 
-curl -L https://downloads.raspberrypi.org/NOOBS_lite_latest -o noobs.zip
-cd epicPiOS 
-unzip ../noobs.zip
-if [ uname -s == "Darwin"]; then
-  sed -i '' -e 's/$/ silentinstall/' recovery.cmdline # different sed syntax on mac
-else
-  sed -i -e 's/$/ silentinstall/' recovery.cmdline
-fi
-mkdir os/epicPiOS
-cat >wpa_supplicant.conf <<EOF
-ctrl_interface=DIR=/var/run/wpa_supplicant GROUP=netdev
-update_config=1
-country=CH
-network={
-        ssid="scratch"
-        psk="8962scratch"
-        key_mgmt=WPA_PSK
-}
-EOF
-cd ..
-
 # Download and prepare raspios beta image from official raspberry download page
 curl -L $dl_url --output raspios.zip
 
@@ -190,7 +167,11 @@ umount /tmp/1
 umount /tmp/2
 EOF
 
+mkdir /media/recovery
+mount /dev/mmcblkp2 /media/recovery
+ed -i -e '/silentinstall/!s/$/ silentinstall/' recovery.cmdline
+
 for file in "boot.tar.xz" "os.json" "partitions.json" "partition_setup.sh" "root.tar.xz"
 do
-  cp $file epicPiOS/os/epicPiOS
+  cp $file /media/recovery/os/epicPiOS
 done
