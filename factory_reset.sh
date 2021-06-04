@@ -14,7 +14,7 @@ if ! mountpoint -q /mnt/recovery/ ; then
  mount /dev/mmcblk0p1 /mnt/recovery 
 fi 
 
-sed -i 's/^/runinstaller /' /mnt/recovery/recovery.cmdline
+sed -i '/runinstaller /!s/^/runinstaller /' /mnt/recovery/recovery.cmdline
 # mv /mnt/recovery/wpa_supplicant.conf.bak /mnt/recovery/wpa_supplicant.conf
 
 reboot now

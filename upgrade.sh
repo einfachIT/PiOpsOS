@@ -167,11 +167,35 @@ umount /tmp/1
 umount /tmp/2
 EOF
 
-mkdir /media/recovery
-mount /dev/mmcblkp2 /media/recovery
-ed -i -e '/silentinstall/!s/$/ silentinstall/' recovery.cmdline
+sudo mkdir /media/recovery
+sudo mount /dev/mmcblk0p1 /media/recovery
 
 for file in "boot.tar.xz" "os.json" "partitions.json" "partition_setup.sh" "root.tar.xz"
 do
   cp $file /media/recovery/os/epicPiOS
 done
+
+# Download and extract NOOBS
+curl -L https://downloads.raspberrypi.org/NOOBS_lite_latest -o noobs.zip
+dir=$(pwd)
+cd /media/recovery/
+unzip /$dir/noobs.zip
+sed -i -e '/silentinstall/!s/$/ silentinstall/' recovery.cmdline
+mkdir os/epicPiOS
+cat >wpa_supplicant.conf <<EOF
+ctrl_interface=DIR=/var/run/wpa_supplicant GROUP=netdev
+update_config=1
+country=CH
+network={
+        ssid="scratch"
+        psk="8962scratch"
+        key_mgmt=WPA_PSK
+}
+EOF
+cd $dir
+rm noobs.zip
+
+sudo umount /media/recovery
+sudo rm -d /media/recovery
+
+
