@@ -1,7 +1,7 @@
 [Unit]
 Description=kicks provision service after boot
 Wants=network-online.target
-After=network-online.target
+After=network-online.target nss-lookup.target
 
 [Timer]
 OnBootSec=60

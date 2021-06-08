@@ -13,8 +13,6 @@ boot_size=$(sudo parted  raspios.img  -s print | grep fat32 | tr -s [:blank:] | 
 boot_size=${boot_size%??} # remove last two chars = MB
 root_size=$(sudo parted  raspios.img  -s print | grep ext4 | tr -s [:blank:] | cut -d " " -f4)
 root_size=${root_size%??} # remove last two chars = MB
-echo boot_size=$boot_size
-echo root_size=$root_size
 sudo kpartx -av raspios.img
 
 # create boot partition tarball boot.tar.xz
@@ -23,7 +21,6 @@ sudo mount /dev/mapper/loop0p1 PI_BOOT/
 cd PI_BOOT/
 sudo bsdtar --numeric-owner --format gnutar -cpf ../boot.tar .
 boot_tarball_size=$(ls ../boot.tar -l --block-size=1MB |  tr -s [:blank:] | cut -d " " -f5)
-echo boot_tarball_size=$boot_tarball_size
 cd ..
 sudo xz -9 -e boot.tar
 boot_sha256sum=$(sha256sum boot.tar.xz | cut -d " " -f1)
@@ -63,7 +60,6 @@ cd PI_ROOT/
   sudo bsdtar --numeric-owner --format gnutar --one-file-system -cpf ../root.tar .
   root_tarball_size=$(ls ../root.tar -l --block-size=1MB |  tr -s [:blank:] | cut -d " " -f5)
 
-echo root_tarball_size=$root_tarball_size
 cd ..
 sudo xz -9 -e root.tar
 root_sha256sum=$(sha256sum root.tar.xz | cut -d " " -f1)
@@ -167,19 +163,14 @@ umount /tmp/1
 umount /tmp/2
 EOF
 
-sudo mkdir /media/recovery
-sudo mount /dev/mmcblk0p1 /media/recovery
-
-for file in "boot.tar.xz" "os.json" "partitions.json" "partition_setup.sh" "root.tar.xz"
-do
-  cp $file /media/recovery/os/epicPiOS
-done
+sudo mkfs.fat /dev/mmcblk0p1
+sudo mkdir RECOVERY
+sudo mount /dev/mmcblk0p1 RECOVERY -o umask=000,uid=$(id -u),gid=$(id -g)
 
 # Download and extract NOOBS
 curl -L https://downloads.raspberrypi.org/NOOBS_lite_latest -o noobs.zip
-dir=$(pwd)
-cd /media/recovery/
-unzip /$dir/noobs.zip
+cd RECOVERY 
+unzip ../noobs.zip
 sed -i -e '/silentinstall/!s/$/ silentinstall/' recovery.cmdline
 mkdir os/epicPiOS
 cat >wpa_supplicant.conf <<EOF
@@ -192,10 +183,16 @@ network={
         key_mgmt=WPA_PSK
 }
 EOF
-cd $dir
+cd ..
 rm noobs.zip
 
-sudo umount /media/recovery
-sudo rm -d /media/recovery
+# Copy installation files to recovery partition
+for file in "boot.tar.xz" "os.json" "partitions.json" "partition_setup.sh" "root.tar.xz"
+do
+  cp $file RECOVERY/os/epicPiOS
+done
+
+sudo umount RECOVERY
+sudo rm -d RECOVERY
 
 
