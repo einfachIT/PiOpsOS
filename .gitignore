@@ -10,3 +10,4 @@ partition_setup.sh
 *.xz
 PI_ROOT
 PI_BOOT
+out/*

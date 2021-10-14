@@ -1,0 +1,4 @@
+/epicPiOS/images/2021-05-07-raspios-buster-arm64.img1 8192 532479 524288 256M c W95 FAT32 (LBA)
+/epicPiOS/images/2021-05-07-raspios-buster-arm64.img2 532480 7299071 6766592 3.2G 83 Linux
+/epicPiOS/images/2021-05-07-raspios-buster-arm64-lite.img1 8192 532479 524288 256M c W95 FAT32 (LBA)
+/epicPiOS/images/2021-05-07-raspios-buster-arm64-lite.img2 532480 3547135 3014656 1.4G 83 Linux
