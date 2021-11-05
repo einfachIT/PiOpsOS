@@ -14,7 +14,7 @@ To only switch between booting to recovery mode and normal mode use ```sudo /boo
 1. checkout repo
 2b. ```./epic-server-answers | ./create_epicPiOS``` or  ```./epic-desktop-answers | ./create_epicPiOS``` 
 or in a docker container
-2b. ```run -t -v /dev:/dev -v $(pwd):/epicPiOS --privileged ubuntu /bin/bash -c 'cd epicPiOS; cat epic-server-answers | ./create_epicPiOS'```
+2b. ```run -t -v /dev:/dev -v $(pwd):/epicPiOS --privileged ubuntu /bin/bash -c 'cd epicPiOS; ./epic-server-answers | ./create_epicPiOS'```
 
 resulting image is then stored under ./tmo
 
