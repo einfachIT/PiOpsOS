@@ -1,6 +1,6 @@
 # epicPiOS
 
-An always resettable Operationg System based on respios. There are two flawers, one desktop version and one server version. Idea from [MagPi](https://magpi.raspberrypi.com/articles/raspberry-pi-recovery-partition) code manly copied from PJ Evans [github repo]https://github.com/mrpjevans/raspbian_restore).
+An always resettable Operationg System based on respios. There are two flavers, one desktop version and one server version. Idea from [MagPi](https://magpi.raspberrypi.com/articles/raspberry-pi-recovery-partition) code manly copied from PJ Evans [github repo]https://github.com/mrpjevans/raspbian_restore).
 
 ## Usage
 1. Ddownload zip from https://sourceforge.net/projects/epicpios/
