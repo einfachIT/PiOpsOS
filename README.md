@@ -1,5 +1,6 @@
 # epicPiOS
 
+<<<<<<< HEAD
 An always resettable Operationg System based on respios. There are two flawers, one desktop version and one server version. Idea from [MagPi](https://magpi.raspberrypi.com/articles/raspberry-pi-recovery-partition) code manly copied from PJ Evans [github repo]https://github.com/mrpjevans/raspbian_restore).
 
 ## Important Notes
@@ -15,9 +16,8 @@ To only switch between booting to recovery mode and normal mode use ```sudo /boo
 
 ## Build
 1. checkout repo
-2b. ```./epic-server-answers | ./create_epicPiOS``` or  ```./epic-desktop-answers | ./create_epicPiOS``` 
-or in a docker container
 2b. ```docker run -t -v /dev:/dev -v $(pwd):/epicPiOS --privileged ubuntu /bin/bash -c 'cd epicPiOS; ./epic-server-answers | ./create_epicPiOS'```
+2b. ```run -t -v /dev:/dev -v $(pwd):/epicPiOS --privileged ubuntu /bin/bash -c 'cd epicPiOS; ./epic-server-answers | ./create_epicPiOS'```
 
 resulting image is then stored under ./tmo
 
