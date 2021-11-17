@@ -1,12 +1,8 @@
-partitions.json
-epicPiOS
-os.json
-partition_setup.sh
+/tmp
 *.img
 *.zip
 *.bak
 *.swp
 *.tar
 *.xz
-PI_ROOT
-PI_BOOT
+.DS_Store

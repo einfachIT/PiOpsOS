@@ -1,0 +1,56 @@
+# This is a basic workflow to help you get started with Actions
+
+name: CI
+
+on:
+  release:
+    types: [released]
+
+# A workflow run is made up of one or more jobs that can run sequentially or in parallel
+jobs:
+  # This workflow contains a single job called "build"
+  build:
+    # The type of runner that the job will run on
+    runs-on: ubuntu-latest
+
+    # Steps represent a sequence of tasks that will be executed as part of the job
+    steps:
+      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
+      - uses: actions/checkout@v2
+
+      # Runs a single command using the runners shell
+      - name: Prepare build
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y zip
+
+      # Runs a set of commands using the runners shell
+      - name: Create OS files
+        run: ./epic-raspberries-answers | sudo ./create_epicPiOS 
+
+      # Create Zip file
+      - name: Create Package
+        run: zip epicPiOS.zip  tmp/2021-05-07-raspios-buster-arm64.restore.img
+
+      - name: Upload artifacts for later publishing
+        uses: actions/upload-artifact@v2
+        with:
+          name: epicPiOS_${{ github.event.release.tag_name }}
+          path: epicPiOS.zip
+        
+      - name: Create SSH key
+        run: |
+          mkdir -p ~/.ssh/
+          echo "$SSH_PRIVATE_KEY" > ../private.key
+          sudo chmod 600 ../private.key
+          echo "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+        shell: bash
+        env:
+          SSH_PRIVATE_KEY: ${{secrets.SSH_PRIVATE_KEY}}
+          SSH_KNOWN_HOSTS: ${{secrets.SSH_KNOWN_HOSTS}}
+      
+      - name: publish to sourceforge
+        run: rsync --progress -e "ssh -i $SSH_KEY_PATH" epicPiOS.zip bassinator20@frs.sourceforge.net:/home/frs/project/epicpios/${{ github.event.release.tag_name }}/
+        env:
+          SSH_KEY_PATH: ${{ github.workspace }}/../private.key
+        
