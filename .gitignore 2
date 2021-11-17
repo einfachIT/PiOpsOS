@@ -1,0 +1,12 @@
+partitions.json
+epicPiOS
+os.json
+partition_setup.sh
+*.img
+*.zip
+*.bak
+*.swp
+*.tar
+*.xz
+PI_ROOT
+PI_BOOT
