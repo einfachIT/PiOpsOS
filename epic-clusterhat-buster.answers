@@ -1,0 +1,13 @@
+#!/bin/bash
+
+cat << EOF
+yes
+https://dist.8086.net/clusterctrl/buster/2020-12-02/2020-12-02-1-ClusterCTRL-armhf-lite-CBRIDGE.zip
+https://dist.8086.net/clusterctrl/buster/2020-12-02/2020-12-02-1-ClusterCTRL-armhf-lite-CBRIDGE.zip
+small
+yes
+yes
+yes
+yes
+EOF
+
