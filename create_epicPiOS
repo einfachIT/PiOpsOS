@@ -86,7 +86,7 @@ MAIN_OS_BASE=${MAIN_OS%.*}
 # create hardlink with different name if recovery and main os are the same
 if [ $RECOVERY_OS == $MAIN_OS ]; then
   RECOVERY_OS_BASE=${MAIN_OS_BASE}-recovery
-  RECOVERY_OS=#{RECOVERY_OS_BASE}.zip
+  RECOVERY_OS=${RECOVERY_OS_BASE}.zip
   if [ ! -f ./tmp/${MAIN_OS_BASE}-recovery.img ]; then
     ln ./tmp/$MAIN_OS_BASE.img ./tmp/${MAIN_OS_BASE}-recovery.img
   fi
