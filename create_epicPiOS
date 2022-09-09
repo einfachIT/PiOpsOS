@@ -40,7 +40,7 @@ INSTALL SOFTWARE
 EOF
 
 apt update
-apt install -y uuid-runtime parted curl unzip kpartx
+apt install -y uuid-runtime parted curl unzip kpartx xz-utils
 
 cat << EOF
 OK
@@ -101,7 +101,7 @@ if [ ! -f "./tmp/$MAIN_OS_BASE.img" ]; then
     curl -L $MAIN_OS_URL > ./tmp/$MAIN_OS
   fi
   echo Unzipping $MAIN_OS
-  unzip ./tmp/$MAIN_OS -d ./tmp
+  unxz ./tmp/$MAIN_OS -d ./tmp
 else
   echo $MAIN_OS_BASE.img found
 fi
@@ -124,7 +124,7 @@ if [ ! -f "./tmp/$RECOVERY_OS_BASE.img" ]; then
     curl -L $RECOVERY_OS_URL > ./tmp/$RECOVERY_OS
   fi
   echo Unzipping $RECOVERY_OS
-  unzip ./tmp/$RECOVERY_OS -d ./tmp
+  unxz ./tmp/$RECOVERY_OS -d ./tmp
 else
   echo $RECOVERY_OS_BASE.img found
 fi
