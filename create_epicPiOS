@@ -80,8 +80,10 @@ MAIN_OS=${MAIN_OS_URL##*\/}
 
 
 # Filenames without extensions
-RECOVERY_OS_BASE=${RECOVERY_OS%.*}
-MAIN_OS_BASE=${MAIN_OS%.*}
+RECOVERY_OS_IMG=${RECOVERY_OS%.*}
+RECOVERY_OS_BASE=${RECOVERY_OS_IMG%.*}
+MAIN_OS_IMG=${MAIN_OS%.*}
+MAIN_OS_BASE=${MAIN_OS_IMG%.*}
 
 
 echo Target version for recovery partition is $RECOVERY_OS
@@ -95,36 +97,37 @@ EOF
 
 # Do we have an img? Full
 if [ ! -f "./tmp/$MAIN_OS_BASE.img" ]; then
-  echo $MAIN_OS_BASE.img not found
+  echo $MAIN_OS_IMG not found
   if [ ! -f "./tmp/$MAIN_OS" ]; then
     echo $MAIN_OS not found, downloading
     curl -L $MAIN_OS_URL > ./tmp/$MAIN_OS
   fi
   echo Unzipping $MAIN_OS
-  unxz ./tmp/$MAIN_OS -d ./tmp
+  unxz ./tmp/$MAIN_OS -c > ./tmp/$MAIN_OS_IMG
 else
-  echo $MAIN_OS_BASE.img found
+  echo $MAIN_OS_IMG found
 fi
 
 # create hardlink with different name if recovery and main os are the same
 if [ $RECOVERY_OS == $MAIN_OS ]; then
   RECOVERY_OS_BASE=${MAIN_OS_BASE}-recovery
-  RECOVERY_OS=${RECOVERY_OS_BASE}.zip
-  if [ ! -f ./tmp/${MAIN_OS_BASE}-recovery.img ]; then
-    ln ./tmp/$MAIN_OS_BASE.img ./tmp/${MAIN_OS_BASE}-recovery.img
+  RECOVERY_OS_IMG=${RECOVERY_OS_BASE}.img
+  RECOVERY_OS=${RECOVERY_OS_IMG}.xz
+  if [ ! -f ./tmp/${RECOVERY_OS_IMG} ]; then
+    ln ./tmp/$MAIN_OS_IMG ./tmp/${RECOVERY_OS_IMG}
   fi
 fi
 
  
-# Do we have an zip? Lite
-if [ ! -f "./tmp/$RECOVERY_OS_BASE.img" ]; then
-  echo $RECOVERY_OS_BASE.img not found
+# Do we have an archive? Lite
+if [ ! -f "./tmp/$RECOVERY_OS_IMG" ]; then
+  echo $RECOVERY_OS_IMG not found
   if [ ! -f "./tmp/$RECOVERY_OS" ]; then
     echo $RECOVERY_OS not found, downloading
     curl -L $RECOVERY_OS_URL > ./tmp/$RECOVERY_OS
   fi
   echo Unzipping $RECOVERY_OS
-  unxz ./tmp/$RECOVERY_OS -d ./tmp
+  unxz ./tmp/$RECOVERY_OS -c > ./tmp/$RECOVERY_OS_IMG
 else
   echo $RECOVERY_OS_BASE.img found
 fi
