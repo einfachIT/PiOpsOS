@@ -30,7 +30,7 @@ jobs:
 
       # Create Zip file
       - name: Create Package
-        run: zip epicServer.zip  tmp/*.restore.img
+        run: zip -j epicServer.zip  tmp/*.restore.img
 
       - name: Upload artifacts for later publishing
         uses: actions/upload-artifact@v2
