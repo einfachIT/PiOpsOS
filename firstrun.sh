@@ -9,6 +9,9 @@ NEW_HOSTNAME=`lsblk /dev/mmcblk0  -n -o name,serial | grep '^mmcblk0' | xargs | 
 echo $NEW_HOSTNAME>/etc/hostname
 sed -i "s/127.0.1.1.*$CURRENT_HOSTNAME/127.0.1.1\t$NEW_HOSTNAME/g" /etc/hosts
 
+#avahi deamon should not be started on eth0 interfase
+sed -i "s/^#deny-interfaces.*/deny-interfaces=eth0/" /etc/avahi/avahi-daemon.conf
+
 #copied from official raspi-imager firstrun
 FIRSTUSER=`getent passwd 1000 | cut -d: -f1`
 FIRSTUSERHOME=`getent passwd 1000 | cut -d: -f6`
