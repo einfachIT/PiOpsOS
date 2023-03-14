@@ -26,7 +26,7 @@ jobs:
 
       # Runs a set of commands using the runners shell
       - name: Create OS files
-        run: ./epic-raspberries-answers | sudo ./create_epicPiOS 
+        run: ./epic-desktop-answers | sudo ./create_epicPiOS 
 
       # Create Zip file
       - name: Create Package
