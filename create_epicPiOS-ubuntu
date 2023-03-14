@@ -40,7 +40,7 @@ INSTALL SOFTWARE
 EOF
 
 apt update
-apt install -y uuid-runtime parted curl unzip kpartx xz-utils fdisk
+apt install -y uuid-runtime parted curl unzip kpartx xz-utils
 
 cat << EOF
 OK
@@ -153,8 +153,8 @@ else
 fi
 
 
-FAT_LENGTH=$(fdisk -lu ./tmp/$RECOVERY_OS_BASE.img | grep .img1 | sed -n "s/ \+/ /gp" | cut -d ' ' -f 2)
-PARTITION_1=$(fdisk -lu ./tmp/$RECOVERY_OS_BASE.img | grep .img1 | sed -n "s/ \+/ /gp" | cut -d ' ' -f 4)
+FAT_LENGTH=$(fdisk -lu ./tmp/$RECOVERY_OS_BASE.img | grep .img1 | sed -n "s/ \+/ /gp" | cut -d ' ' -f 3)
+PARTITION_1=$(fdisk -lu ./tmp/$RECOVERY_OS_BASE.img | grep .img1 | sed -n "s/ \+/ /gp" | cut -d ' ' -f 5)
 LITE_ROOT_LENGTH=$(fdisk -lu ./tmp/$RECOVERY_OS_BASE.img | grep .img2 | sed -n "s/ \+/ /gp" | cut -d ' ' -f 4)
 FULL_ROOT_LENGTH=$(fdisk -lu ./tmp/$MAIN_OS_BASE.img | grep .img2 | sed -n "s/ \+/ /gp" | cut -d ' ' -f 4)
 PARTITION_2=$((LITE_ROOT_LENGTH+FULL_ROOT_LENGTH))
