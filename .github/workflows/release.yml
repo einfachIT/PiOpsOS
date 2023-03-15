@@ -38,19 +38,9 @@ jobs:
           name: epicPiOS_${{ github.event.release.tag_name }}
           path: epicPiOS.zip
         
-      - name: Create SSH key
-        run: |
-          mkdir -p ~/.ssh/
-          echo "$SSH_PRIVATE_KEY" > ../private.key
-          sudo chmod 600 ../private.key
-          echo "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
-        shell: bash
-        env:
-          SSH_PRIVATE_KEY: ${{secrets.SSH_PRIVATE_KEY}}
-          SSH_KNOWN_HOSTS: ${{secrets.SSH_KNOWN_HOSTS}}
-      
-      - name: publish to sourceforge
-        run: rsync --progress -e "ssh -i $SSH_KEY_PATH" epicPiOS.zip bassinator20@frs.sourceforge.net:/home/frs/project/epicpios/${{ github.event.release.tag_name }}/
-        env:
-          SSH_KEY_PATH: ${{ github.workspace }}/../private.key
-        
+      - name: Upload to gdrive
+        uses: adityak74/google-drive-upload-git-action@main
+        with:
+          credentials: ${{ secrets.GDRIVE_CREDENTIALS }}
+          filename: "epicPiOS.zip"
+          folderId: ${{ secrets.UPLOAD_FOLDER_ID }}
