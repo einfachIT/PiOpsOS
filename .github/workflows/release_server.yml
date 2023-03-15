@@ -43,5 +43,5 @@ jobs:
         with:
           credentials: ${{ secrets.GDRIVE_CREDENTIALS }}
           filename: "epicServer.zip"
-          folderId: ${{ secrets.UPLOAD_FOLDER_ID }}
+          folderId: ${{ vars.UPLOAD_FOLDER_ID }}
         
