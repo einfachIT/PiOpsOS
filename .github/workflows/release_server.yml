@@ -22,7 +22,7 @@ jobs:
       - name: Prepare build
         run: |
           sudo apt-get update
-          sudo apt-get install -y zip
+          sudo apt-get install -y zip curl jq
 
       # Runs a set of commands using the runners shell
       - name: Create OS files
@@ -38,10 +38,27 @@ jobs:
           name: epicServer_${{ github.event.release.tag_name }}
           path: epicServer.zip
           
-      - name: Upload to gdrive
-        uses: adityak74/google-drive-upload-git-action@main
-        with:
-          credentials: ${{ secrets.GDRIVE_CREDENTIALS }}
-          filename: "epicServer.zip"
-          folderId: ${{ vars.UPLOAD_FOLDER_ID }}
-        
+                
+      - name: Upload to GDrive
+          run: |
+            # GET ACCESS TOKEN
+            ACCESS_TOKEN=$(curl --request POST --data "\
+            client_id=$CLIENT_ID&\
+            client_secret=$CLIENT_SECRET&\
+            refresh_token=$REFRESH_TOKEN&\
+            grant_type=refresh_token" https://oauth2.googleapis.com/token | jq -r .access_token)
+            # GET UPLOAD URL
+            UPLOAD_URL=$(curl -X POST -i \
+              --header "Authorization: Bearer  $ACCESS_TOKEN" \
+              --header 'Content-Type: application/json' --header "Accept-Header: application/json" \
+              --data '{"name":"epicServer_${{ github.event.release.tag_name }}.zip","mimeType":"application/gzip","driveId":"$DRIVE_ID","parents":["$DRIVE_ID"]}'
+              "https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&supportsAllDrives=true" | grep -Fi location | tr -d '\r' | cut -d' ' -f2)
+            # UPLOAD FILE
+            curl -X PUT -i \
+            -F "file=@epicServer.zip"  "$UPLOAD_URL"
+          shell: bash
+          env:
+            DRIVE_ID: ${{vars.GDRIVE_ASSETS_DRIVE_ID}}
+            REFRESH_TOKEN: ${{secrets.GDRIVE_API_REFRESH_TOKEN}}
+            CLIENT_ID: ${{vars.GDRIVE_OAUTH_CLIENT_ID}}
+            CLIENT_SECRET: ${{secrets.GDRIVE_OAUTH_CLIENT_SECRET}}
