@@ -32,13 +32,6 @@ jobs:
       # Create Zip file
       - name: Create Package
         run: zip -j epicServer.zip  tmp/*.restore.img
-
-      - name: Upload artifacts for later publishing
-        uses: actions/upload-artifact@v2
-        with:
-          name: epicServer_${{ github.event.release.tag_name }}
-          path: epicServer.zip
-          
                 
       - name: Upload to GDrive
         run: |
@@ -48,12 +41,14 @@ jobs:
           client_secret=$CLIENT_SECRET&\
           refresh_token=$REFRESH_TOKEN&\
           grant_type=refresh_token" https://oauth2.googleapis.com/token | jq -r .access_token | tee /dev/tty)
+          echo $ACCESS_TOKEN
           # GET UPLOAD URL
           UPLOAD_URL=$(curl -X POST -i \
           --header "Authorization: Bearer  $ACCESS_TOKEN" \
           --header 'Content-Type: application/json' --header "Accept-Header: application/json" \
           --data '{"name":"epicServer_${{ github.event.release.tag_name }}.zip","mimeType":"application/gzip","driveId":"0AMaAJBBj9MiUUk9PVA"' \
           "https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&supportsAllDrives=true" | grep -Fi location | tr -d '\r' | cut -d' ' -f2 | tee /dev/tty)
+          echo $UPLOAD_URL
           # UPLOAD FILE
           curl -X PUT -i \
           -F "file=@epicServer.zip"  "$UPLOAD_URL"
