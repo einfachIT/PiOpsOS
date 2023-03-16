@@ -32,12 +32,6 @@ jobs:
       - name: Create Package
         run: zip -j epicPiOS.zip  tmp/*.restore.img
 
-      - name: Upload artifacts to github
-        uses: actions/upload-artifact@v2
-        with:
-          name: epicPiOS_${{ github.event.release.tag_name }}
-          path: epicPiOS.zip
-          
       - name: Upload to GDrive
         run: |
           # GET ACCESS TOKEN
@@ -46,12 +40,14 @@ jobs:
           client_secret=$CLIENT_SECRET&\
           refresh_token=$REFRESH_TOKEN&\
           grant_type=refresh_token" https://oauth2.googleapis.com/token | jq -r .access_token)
+          echo $ACCESS_TOKEN
           # GET UPLOAD URL
           UPLOAD_URL=$(curl -X POST -i \
           --header "Authorization: Bearer  $ACCESS_TOKEN" \
           --header 'Content-Type: application/json' --header "Accept-Header: application/json" \
-          --data '{"name":"epicPiOS_${{ github.event.release.tag_name }}.zip","mimeType":"application/gzip","driveId":"$DRIVE_ID","parents":["$DRIVE_ID"]}' \
+          --data '{"name":"epicPiOS_${{ github.event.release.tag_name }}.zip","mimeType":"application/gzip","driveId":"0AMaAJBBj9MiUUk9PVA"}' \
           "https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&supportsAllDrives=true" | grep -Fi location | tr -d '\r' | cut -d' ' -f2)
+          echo $UPLOAD_URL
           # UPLOAD FILE
           curl -X PUT -i \
           -F "file=@epicPiOS.zip"  "$UPLOAD_URL"
