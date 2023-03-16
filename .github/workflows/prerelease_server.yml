@@ -32,7 +32,7 @@ jobs:
       - name: Create Package
         run: zip -j epicServer.zip  tmp/*.restore.img
 
-      - name: Upload artifacts for later publishing
+      - name: Upload artifacts
         uses: actions/upload-artifact@v2
         with:
           name: epicServer_${{ github.event.release.tag_name }}
