@@ -3,6 +3,7 @@
 name: Publish Server Release
 
 on:
+  workflow_dispatch:
   release:
     types: [released]
 
@@ -46,13 +47,13 @@ jobs:
           client_id=$CLIENT_ID&\
           client_secret=$CLIENT_SECRET&\
           refresh_token=$REFRESH_TOKEN&\
-          grant_type=refresh_token" https://oauth2.googleapis.com/token | jq -r .access_token)
+          grant_type=refresh_token" https://oauth2.googleapis.com/token | jq -r .access_token | tee /dev/tty)
           # GET UPLOAD URL
           UPLOAD_URL=$(curl -X POST -i \
           --header "Authorization: Bearer  $ACCESS_TOKEN" \
           --header 'Content-Type: application/json' --header "Accept-Header: application/json" \
           --data '{"name":"epicServer_${{ github.event.release.tag_name }}.zip","mimeType":"application/gzip","driveId":"0AMaAJBBj9MiUUk9PVA"' \
-          "https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&supportsAllDrives=true" | grep -Fi location | tr -d '\r' | cut -d' ' -f2)
+          "https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&supportsAllDrives=true" | grep -Fi location | tr -d '\r' | cut -d' ' -f2 | tee /dev/tty)
           # UPLOAD FILE
           curl -X PUT -i \
           -F "file=@epicServer.zip"  "$UPLOAD_URL"
