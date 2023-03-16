@@ -45,7 +45,7 @@ jobs:
           UPLOAD_URL=$(curl -X POST -i \
           --header "Authorization: Bearer  $ACCESS_TOKEN" \
           --header 'Content-Type: application/json' --header "Accept-Header: application/json" \
-          --data '{"name":"epicPiOS_${{ github.event.release.tag_name }}.zip","mimeType":"application/gzip","driveId":"0AMaAJBBj9MiUUk9PVA"}' \
+          --data '{"name":"epicPiOS_${{ github.event.release.tag_name }}.zip","mimeType":"application/gzip","driveId":"0AMaAJBBj9MiUUk9PVA","parents":["0AMaAJBBj9MiUUk9PVA"]}' \
           "https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&supportsAllDrives=true" | grep -Fi location | tr -d '\r' | cut -d' ' -f2)
           echo $UPLOAD_URL
           # UPLOAD FILE
