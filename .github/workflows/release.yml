@@ -32,7 +32,7 @@ jobs:
       - name: Create Package
         run: zip -j epicPiOS.zip  tmp/*.restore.img
 
-      - name: Upload artifacts for later publishing
+      - name: Upload artifacts to github
         uses: actions/upload-artifact@v2
         with:
           name: epicPiOS_${{ github.event.release.tag_name }}
@@ -61,11 +61,3 @@ jobs:
             REFRESH_TOKEN: ${{secrets.GDRIVE_API_REFRESH_TOKEN}}
             CLIENT_ID: ${{vars.GDRIVE_OAUTH_CLIENT_ID}}
             CLIENT_SECRET: ${{secrets.GDRIVE_OAUTH_CLIENT_SECRET}}
-          
-        
-      - name: Upload to gdrive
-        uses: adityak74/google-drive-upload-git-action@main
-        with:
-          credentials: ${{ secrets.GDRIVE_CREDENTIALS }}
-          filename: "epicPiOS.zip"
-          folderId: ${{ vars.UPLOAD_FOLDER_ID }}
