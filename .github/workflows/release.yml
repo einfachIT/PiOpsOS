@@ -50,7 +50,7 @@ jobs:
           echo $UPLOAD_URL
           # UPLOAD FILE
           curl -X PUT -i \
-          --upload-file "epicServer.zip" "$UPLOAD_URL"
+          --upload-file "epicPiOS.zip" "$UPLOAD_URL"
         shell: bash
         env:
           DRIVE_ID: ${{vars.GDRIVE_ASSETS_DRIVE_ID}}
