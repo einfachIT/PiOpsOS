@@ -1,0 +1,22 @@
+#!/bin/bash
+if [ "$EUID" -ne 0 ]
+  then echo "Please run as root"
+  exit
+fi
+
+echo Rebooting to recovery partition in 5 seconds
+sleep 5
+
+if [ "$1" = "restore" ]; then
+    echo Automatic restore selected
+    touch /boot/restore
+    [ -e /boot/ssh ] && rm /boot/ssh
+else
+    touch /boot/ssh
+fi
+
+sed -i 's/-03/-02/' /boot/cmdline.txt
+
+reboot
+
+exit 0

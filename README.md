@@ -18,5 +18,5 @@ To only switch between booting to recovery mode and normal mode use ```sudo /boo
 1. checkout repo
 2b. ```docker run -t -v /dev:/dev -v $(pwd):/epicPiOS --privileged ubuntu:focal /bin/bash -c 'cd epicPiOS; ./epic-server-answers | ./create_epicPiOS'```
 
-resulting image is then stored under ./tmo
+resulting image is then stored in ./tmp
 

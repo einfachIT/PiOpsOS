@@ -340,105 +340,48 @@ done manually.
 
 EOF
 
-read -r -p "Shall I create the recovery scripts? [Y/n] " response
-if [[ "$response" =~ ^([yY][eE][sS]|[yY])+$ ]] || [[ "$response" == "" ]]; then
-
 
 echo
-echo Create recovery scripts
-echo ======================
+echo copy scripts
+echo ============ 
 
-echo copy firstrun.sh
-cp firstrun.sh ./tmp/mnt/restore_boot/
-chmod +x ./tmp/mnt/restore_boot/firstrun.sh
-sed -i '1{s|$| systemd.run=/boot/firstrun.sh systemd.run_success_action=reboot systemd.unit=kernel-command-line.target|}' ./tmp/mnt/restore_boot/cmdline.txt
-sed -i 's/#disable_overscan=1/disable_overscan=1/' ./tmp/mnt/restore_boot/config.txt
+echo copy userconf.txt
+cp userconf.txt ./tmp/mnt/restore_boot/
 
+echo copy boot_to_recovery
+cp boot_to_recovery ./tmp/mnt/restore_boot/
 
-echo Creating boot_to_recovery
-cat << EOF > ./tmp/mnt/restore_boot/boot_to_recovery
-#!/bin/bash
-if [ "\$EUID" -ne 0 ]
-  then echo "Please run as root"
-  exit
-fi
+echo copy boot_to_root
+cp boot_to_root ./tmp/mnt/restore_boot/
 
-echo Rebooting to recovery partition in 5 seconds
+echo copy restore_root
+cp restore_root ./tmp/mnt/restore_boot/
 
-if [ "\$1" = "restore" ]; then
-    echo Automatic restore selected
-    touch /boot/restore
-fi
+echo copy check_restore_gpio
+cp check_restore_gpio.py ./tmp/mnt/restore_boot/
 
-sleep 5
-sed -i 's/-03/-02/' /boot/cmdline.txt
-touch /boot/ssh
-reboot
-
-exit 0
-EOF
-
-chmod +x ./tmp/mnt/restore_boot/boot_to_recovery
-
-echo Creating boot_to_root
-cat << EOF > ./tmp/mnt/restore_boot/boot_to_root
-#!/bin/bash
-if [ "\$EUID" -ne 0 ]
-  then echo "Please run as root"
-  exit
-fi
-
-echo Rebooting to root partition in 5 seconds
-sleep 5
-sed -i 's/-02/-03/' /boot/cmdline.txt
-mv /boot/firstrun.done /boot/firstrun.sh
-sed -i '1{s|$| systemd.run=/boot/firstrun.sh systemd.run_success_action=reboot systemd.unit=kernel-command-line.target|}' /boot/cmdline.txt
-reboot
-exit 0
-EOF
-
-chmod +x ./tmp/mnt/restore_boot/boot_to_root
-
-echo Creating restore_root
-cat << EOF > ./tmp/mnt/restore_boot/restore_root
-#!/bin/bash
-if [ -f "/boot/restore" ]; then
-    echo Restoring rootfs
-    dd if=/rootfs.img of=/dev/mmcblk0p3 conv=fsync status=progress bs=4M
-    unlink /boot/restore
-    /boot/boot_to_root
-fi
-exit 0
-EOF
-
-chmod +x ./tmp/mnt/restore_boot/restore_root
-
-echo Creating check_restore_gpio
-cat << EOF > ./tmp/mnt/restore_boot/check_restore_gpio.py
-import os
-from gpiozero import Button
-
-button = Button(21)
-
-if button.is_pressed:
-    print("Restore button is pressed")
-    os.system("/boot/boot_to_recovery restore")
-else:
-    print("Restore button is not pressed")
-EOF
-
-echo Scripts created, now modifying rc.locals
+echo Scripts copied, now modifying rc.locals
 sed -i '$ i /boot/restore_root' ./tmp/mnt/restore_recovery/etc/rc.local
 sed -i '$ i python3 /boot/check_restore_gpio.py' ./tmp/mnt/restore_rootfs/etc/rc.local
 
-# End of create recovery scripts
-fi
+# echo
+# echo addapt cmdline.txt and config.txt
+# echo =================================
+# sed -i '1{s|$| systemd.run=/boot/firstrun.sh systemd.run_success_action=reboot systemd.unit=kernel-command-line.target|}' ./tmp/mnt/restore_boot/cmdline.txt
+# sed -i 's/#disable_overscan=1/disable_overscan=1/' ./tmp/mnt/restore_boot/config.txt
 
-cat << EOF
 
-Create backup image
-===================
-EOF
+echo
+echo Modify raspberry-pi-sys-mods
+echo ============================
+# needed to make the image compatible with new imager customisation feature
+# backup firstrun.sh for reuse after recovery
+sed -i '/^mount \/boot$/a cp /boot/firstrun.sh /boot/firstrun.bak' ./tmp/mnt/restore_rootfs/usr/lib/raspberrypi-sys-mods/firstboot
+sed -i '/^mount \/boot$/a touch /boot/firstboot.recovery' ./tmp/mnt/restore_rootfs/usr/lib/raspberrypi-sys-mods/firstboot
+
+echo 
+echo Create backup image
+echo ===================
 
 read -r -p "Shall I image the current root partition to recovery? [Y/n] " response
 if [[ "$response" =~ ^([yY][eE][sS]|[yY])+$ ]] || [[ "$response" == "" ]]; then
