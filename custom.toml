@@ -1,0 +1,9 @@
+# Raspberry Pi First Boot Setup
+[user]
+name = "epic"
+password = "epic"
+password_encrypted = false
+
+[locale]
+keymap = "ch"
+timezone = "Europe/Zurich"

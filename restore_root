@@ -4,7 +4,8 @@ if [ -f "/boot/restore" ]; then
     dd if=/rootfs.img of=/dev/mmcblk0p3 conv=fsync status=progress bs=4M
     unlink /boot/restore
     cp /boot/firstrun.bak /boot/firstrun.sh
-    sed -i '1{s|$| systemd.run=/boot/firstrun.sh systemd.run_success_action=reboot systemd.unit=kernel-command-line.target|}' /boot/cmdline.txt
+    cp /boot/custom.toml.bak /boot/custom.toml
+    sed -i '1{s|$| init=/usr/lib/raspberrypi-sys-mods/firstboot systemd.run=/boot/firstrun.sh systemd.run_success_action=reboot systemd.unit=kernel-command-line.target|}' /boot/cmdline.txt
     /boot/boot_to_root
 fi
 exit 0
