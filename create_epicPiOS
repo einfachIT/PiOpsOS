@@ -146,11 +146,12 @@ echo Copying Raspbian Full to partition 3
 dd if=/dev/mapper/loop${MAIN_IMAGE_LOOPDEV}p2 of=/dev/mapper/loop${BLANK_IMAGE_LOOPDEV}p3 status=progress bs=4M
 
 # This seems to be needed to let the system catch up
-sleep 1
+sleep 5
 
 # Setting IDs
 tune2fs /dev/mapper/loop${BLANK_IMAGE_LOOPDEV}p2 -U ${UUID_RESTORE}
 e2label /dev/mapper/loop${BLANK_IMAGE_LOOPDEV}p2 recoveryfs
+e2fsck -y -f /dev/mapper/loop${BLANK_IMAGE_LOOPDEV}p3
 tune2fs /dev/mapper/loop${BLANK_IMAGE_LOOPDEV}p3 -U ${UUID_ROOTFS}
 
 # Expanding recovery partition to full size
