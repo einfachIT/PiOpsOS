@@ -7,7 +7,7 @@ fi
 echo Rebooting to root partition in 5 seconds
 sleep 5
 
-sed -i 's/-02/-03/' /boot/cmdline.txt
+sed -i 's/mmcblk0p2/mmcblk0p3/' /boot/firmware/cmdline.txt
 
 reboot
 exit 0

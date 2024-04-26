@@ -173,7 +173,7 @@ mount /dev/mapper/loop${BLANK_IMAGE_LOOPDEV}p3 tmp/mnt/restore_rootfs
 sleep 1
 
 # Set boot partition to new ID and partition 3
-sed -i -r "s/(PARTUUID=.*?\-02)/PARTUUID=${PARTUUID}-03/g" tmp/mnt/restore_boot/cmdline.txt
+sed -i -r "s|(PARTUUID=.*?\-02)|/dev/mmcblk0p3|g" tmp/mnt/restore_boot/cmdline.txt
 echo Done
 
 # Fix fstabs
@@ -181,19 +181,18 @@ UUID_BOOT=$(blkid -o export /dev/mapper/loop${BLANK_IMAGE_LOOPDEV}p1 | egrep '^U
 # write fstab
 cat << EOF > ./tmp/mnt/restore_rootfs/etc/fstab
 proc                     /proc  proc    defaults          0       0
-UUID=${UUID_BOOT}  /boot  vfat    defaults          0       2
-UUID=${UUID_ROOTFS}  /      ext4    defaults,noatime  0       1
+/dev/mmcblk0p1  /boot/firmware  vfat    defaults          0       2
+/dev/mmcblk0p3  /      ext4    defaults,noatime  0       1
 EOF
 
 # Writing recovery fstab
 cat << EOF > ./tmp/mnt/restore_recovery/etc/fstab
 proc                    /proc  proc    defaults          0       0
-UUID=${UUID_BOOT}       /boot  vfat    defaults          0       2
-UUID=${UUID_RESTORE}    /      ext4    defaults,noatime  0       1
+/dev/mmcblk0p1       /boot/firmware  vfat    defaults          0       2
+/dev/mmcblk0p2    /      ext4    defaults,noatime  0       1
 EOF
 
 # copy scripts 
-cp custom.toml ./tmp/mnt/restore_boot/
 cp custom.toml ./tmp/mnt/restore_boot/custom.toml.bak # used for recovery original script will be deleted after first boot
 
 echo copy boot_to_recovery
@@ -209,13 +208,14 @@ echo copy check_restore_gpio
 cp check_restore_gpio.py ./tmp/mnt/restore_boot/
 
 # modifying rc.locals
-sed -i '$ i /boot/restore_root' ./tmp/mnt/restore_recovery/etc/rc.local
-sed -i '$ i python3 /boot/check_restore_gpio.py' ./tmp/mnt/restore_rootfs/etc/rc.local
+sed -i '$ i /boot/firmware/restore_root' ./tmp/mnt/restore_recovery/etc/rc.local
+sed -i '$ i python3 /boot/firmware/check_restore_gpio.py' ./tmp/mnt/restore_rootfs/etc/rc.local
 
 # Modify raspberry-pi-sys-mods
 # needed to make the image compatible with new imager customisation feature
 # backup firstrun.sh for reuse after recovery
-sed -i '/^mount \/boot$/a cp /boot/firstrun.sh /boot/firstrun.bak' ./tmp/mnt/restore_rootfs/usr/lib/raspberrypi-sys-mods/firstboot
+sed -i '/^mount \/boot$/a cp /boot/firmware/firstrun.sh /boot/firmware/firstrun.bak' ./tmp/mnt/restore_rootfs/usr/lib/raspberrypi-sys-mods/firstboot
+sed -i '/^mount "$FWLOC" -o rw$/a cp /boot/firmware/firstrun.sh /boot/firmware/firstrun.bak' ./tmp/mnt/restore_rootfs/usr/lib/raspberrypi-sys-mods/firstboot
 
 # write image
 dd if=/dev/mapper/loop${BLANK_IMAGE_LOOPDEV}p3 of=./tmp/mnt/restore_recovery/rootfs.img status=progress bs=4M
