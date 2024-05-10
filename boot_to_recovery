@@ -10,9 +10,6 @@ sleep 5
 if [ "$1" = "restore" ]; then
     echo Automatic restore selected
     touch /boot/firmware/restore
-    [ -e /boot/firmware/ssh ] && rm /boot/firmware/ssh
-else
-    touch /boot/firmware/ssh
 fi
 
 if [ -f "/boot/firmware/custom.toml.bak" ]; then

@@ -80,37 +80,40 @@ else
 fi
 
 
-# calculate sizes in sectors
-SECTORS=0
-FAT_LENGTH=$(fdisk -lu ./tmp/$RECOVERY_OS_BASE.img | grep .img1 |  tr -d \* | sed -n "s/ \+/ /gp" | cut -d ' ' -f 2)
-PARTITION_1=$(fdisk -lu ./tmp/$RECOVERY_OS_BASE.img | grep .img1 |  tr -d \* | sed -n "s/ \+/ /gp" | cut -d ' ' -f 4)
-LITE_ROOT_LENGTH=$(fdisk -lu ./tmp/$RECOVERY_OS_BASE.img | grep .img2 |  tr -d \* | sed -n "s/ \+/ /gp" | cut -d ' ' -f 4)
-FULL_ROOT_LENGTH=$(fdisk -lu ./tmp/$MAIN_OS_BASE.img | grep .img2 |  tr -d \* | sed -n "s/ \+/ /gp" | cut -d ' ' -f 4)
-PARTITION_2=$((LITE_ROOT_LENGTH+FULL_ROOT_LENGTH))
 
-if [ "$SECTORS" -eq 0 ]; then
-  PARTITION_3="$FULL_ROOT_LENGTH"
-  SECTORS=$((FAT_LENGTH+PARTITION_1+PARTITION_2+FULL_ROOT_LENGTH))
+calculate_partitions() {
+  # calculate sizes in sectors
+  RECOVERY_BOOT_START=$(fdisk -lu ./tmp/$RECOVERY_OS_BASE.img | grep .img1 |  tr -d \* | sed -n "s/ \+/ /gp" | cut -d ' ' -f 2)
+  RECOVERY_BOOT_LENGTH=$(fdisk -lu ./tmp/$RECOVERY_OS_BASE.img | grep .img1 |  tr -d \* | sed -n "s/ \+/ /gp" | cut -d ' ' -f 4)
+
+  MAIN_BOOT_START=$(fdisk -lu ./tmp/$MAIN_OS_BASE.img | grep .img1 |  tr -d \* | sed -n "s/ \+/ /gp" | cut -d ' ' -f 2)
+  MAIN_BOOT_LENGTH=$(fdisk -lu ./tmp/$MAIN_OS_BASE.img | grep .img1 |  tr -d \* | sed -n "s/ \+/ /gp" | cut -d ' ' -f 2)
+  
+  RECOVERY_ROOT_LENGTH=$(fdisk -lu ./tmp/$RECOVERY_OS_BASE.img | grep .img2 |  tr -d \* | sed -n "s/ \+/ /gp" | cut -d ' ' -f 4)
+
+  MAIN_ROOT_LENGTH=$(fdisk -lu ./tmp/$MAIN_OS_BASE.img | grep .img2 |  tr -d \* | sed -n "s/ \+/ /gp" | cut -d ' ' -f 4)
+
+
+  PARTITION_1=$RECOVERY_BOOT_LENGTH
+  PARTITION_1b=$MAIN_BOOT_LENGTH
+  PARTITION_2=$((RECOVERY_ROOT_LENGTH+MAIN_ROOT_LENGTH))
+  PARTITION_3=$MAIN_ROOT_LENGTH
+
+  SECTORS=$((PARTITION_1+PARTITION_1b+PARTITION_2+PARTITION_3))
   IMAGE_4MB=$((((SECTORS * 512) / 4194304) + 1))
-else
-  echo Calculating based on an available size of $SECTORS sectors
-  PARTITION_3=$((SECTORS-PARTITION_2-PARTITION_1-FAT_LENGTH))
-  IMAGE_4MB=$(((SECTORS * 512) / 4194304))
-  if [ $PARTITION_3 -lt 1 ]; then
-    echo Too few sectors, unable to continue
-    exit 1
-  fi
-fi
-
-IMAGE_BYTES=$((IMAGE_4MB * 4194304))
-
-dd if=/dev/zero bs=4M count=$IMAGE_4MB status=progress > ./tmp/$MAIN_OS_BASE.restore.img
-
-UUID_RESTORE=$(uuidgen)
-UUID_ROOTFS=$(uuidgen)
-PARTUUID=$(tr -dc 'a-f0-9' < /dev/urandom 2>/dev/null | head -c8)
-PARTITION_2_START=$((FAT_LENGTH + PARTITION_1))
-PARTITION_3_START=$((PARTITION_2_START + PARTITION_2))
+  
+  IMAGE_BYTES=$((IMAGE_4MB * 4194304))
+  
+  dd if=/dev/zero bs=4M count=$IMAGE_4MB status=progress > ./tmp/$MAIN_OS_BASE.restore.img
+  
+  UUID_RESTORE=$(uuidgen)
+  UUID_ROOTFS=$(uuidgen)
+  PARTUUID=$(tr -dc 'a-f0-9' < /dev/urandom 2>/dev/null | head -c8)
+  PARTITION_1_START=$RECOVERY_BOOT_START
+  PARTITION_2_START=$((PARTITION_1_START + PARTITION_1))
+  PARTITION_3_START=$((PARTITION_2_START + PARTITION_2))
+}
+calculate_partitions
 
 # create partitions
 sfdisk ./tmp/$MAIN_OS_BASE.restore.img <<EOF
@@ -118,7 +121,7 @@ label: dos
 label-id: 0x${PARTUUID}
 unit: sectors
 
-$MAIN_OS_BASE.img1 : start=${FAT_LENGTH}, size=${PARTITION_1}, type=c
+$MAIN_OS_BASE.img1 : start=${PARTITION_1_START}, size=${PARTITION_1}, type=c
 $MAIN_OS_BASE.img2 : start=${PARTITION_2_START}, size=${PARTITION_2}, type=83
 $MAIN_OS_BASE.img3 : start=${PARTITION_3_START}, size=${PARTITION_3}, type=83
 EOF
@@ -230,5 +233,3 @@ kpartx -v -d /dev/loop${RECOVERY_IMAGE_LOOPDEV}
 kpartx -v -d /dev/loop${MAIN_IMAGE_LOOPDEV}
 losetup --detach-all
 echo Done
-
-exit 0
