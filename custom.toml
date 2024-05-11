@@ -1,4 +1,6 @@
 # Raspberry Pi First Boot Setup
+config_version = 1
+
 [user]
 name = "epic"
 password = "epic"
