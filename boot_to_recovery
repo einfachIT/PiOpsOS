@@ -19,6 +19,6 @@ fi
 
 sed -i 's/mmcblk0p3/mmcblk0p2/' /boot/firmware/cmdline.txt
 
-reboot
+( sleep 10; reboot ) &
 
 exit 0
