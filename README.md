@@ -8,11 +8,11 @@ see issue: https://github.com/einfachIT/epicPiOS/issues/27
 
 ## Usage
 1. Dowwnload zip from https://drive.google.com/file/d/1vzAD91In2SJPU6bSp5QYZjtqc8LWPEpH/view?usp=sharing
-2. Image your sd card with the raspberry pi imager. !! Do not use any advanced options via command-shift-x otherwise you will break the funktionality!!
+2. Image your sd card with the raspberry pi imager.
 3. Boot your rapspi with the new sd card
 4. To factory reset your pi use: ```sudo /boot/boot_to_recovery restore```
 
-To only switch between booting to recovery mode and normal mode use ```sudo /boot/boot_to_recovery``` and ```sudo /boot/boot_to_root``` without any options.
+To only switch between booting to recovery partition and normal root partition use ```sudo /boot/boot_to_recovery``` and ```sudo /boot/boot_to_root``` without any options.
 
 ## Build
 1. checkout repo
