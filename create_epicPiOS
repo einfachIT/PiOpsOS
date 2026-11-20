@@ -2,234 +2,225 @@
 set -e
 set -x
 
+# ==================== CONFIGURATION ====================
+DEVICE="/dev/sda"                       # USB stick device
+BOOT_MOUNT="/boot/firmware"             # Use /boot if your distro doesn't use /boot/firmware
+WORKDIR="./tmp"
 
-# You really need to be root to do this
-if [ "$EUID" -ne 0 ]
-  then echo "Please run as root or sudo"
-  exit
-fi
+# ==================== FUNCTIONS ====================
 
-# Install Software
+# Download and decompress if not already done
+download_or_use() {
+  local base="$1" url="$2"
+  local filename="${url##*/}"
+  local img="${WORKDIR}/${base}.img"
+  local archive="${WORKDIR}/${filename}"
+
+  [ -f "$img" ] && echo "✓ ${base}.img exists" && return
+  [ ! -f "$archive" ] && { echo "Downloading ${filename}..."; curl -L "$url" -o "$archive"; }
+  echo "Decompressing ${filename}..."
+  unxz "$archive" -c > "$img"
+}
+
+# Extract field N from fdisk -lu output for partition P
+# Usage: get_fdisk_field IMAGE PARTITION_NUMBER FIELD_NUMBER
+get_fdisk_field() {
+  local base
+  base=$(basename "$1")
+  fdisk -lu "$1" | grep -F "${base}${2}" | tr -d '*' | tr -s ' ' | cut -d' ' -f"$3"
+}
+
+# Cleanup loop devices and mounts on exit (success or failure)
+cleanup() {
+  for d in "$BLANK_LOOP" "$RECOVERY_LOOP" "$MAIN_LOOP"; do
+    kpartx -d "/dev/loop${d}" 2>/dev/null || true
+    losetup -d "/dev/loop${d}" 2>/dev/null || true
+  done
+  for m in "${RECOVERY_BOOT_MOUNT}" "${RECOVERY_ROOT_MOUNT}" "${ROOTFS_MOUNT}"; do
+    umount "$m" 2>/dev/null || true
+  done
+}
+trap cleanup EXIT
+
+# ==================== INSTALL SOFTWARE====================
+export DEBIAN_FRONTEND=noninteractive
 apt update
 apt install -y uuid-runtime parted curl unzip kpartx xz-utils fdisk
 
-# Get Urls of used images
-read -r -p "What is the url of the recovery os image? " RECOVERY_OS_URL
-read -r -p "What is the url of the main os image? " MAIN_OS_URL
 
-WORKDIR="./tmp"
-if [ ! -d $WORKDIR ]; then
-  mkdir $WORKDIR
-  if ! [ $? -eq 0 ]; then
-      echo I couldn\'t create that directory, sorry.
-      exit 0
-  fi
-fi
+# ==================== PREPARATION ====================
+echo "=== USB Restore Image Builder ==="
+mkdir -p "$WORKDIR"
 
+# Accept URLs from args or prompt
+RECOVERY_OS_URL="${1:-$(read -r -p "Recovery OS URL: " u; echo $u)}"
+MAIN_OS_URL="${2:-$(read -r -p "Main OS URL: " u; echo $u)}"
 
-# ZIP filenames
-RECOVERY_OS=${RECOVERY_OS_URL##*\/}
-MAIN_OS=${MAIN_OS_URL##*\/}
+RECOVERY_OS="${RECOVERY_OS_URL##*/}"
+MAIN_OS="${MAIN_OS_URL##*/}"
+RECOVERY_OS_BASE="${RECOVERY_OS%.*}"
+RECOVERY_OS_BASE="${RECOVERY_OS_BASE%.*}"
+MAIN_OS_BASE="${MAIN_OS%.*}"
+MAIN_OS_BASE="${MAIN_OS_BASE%.*}"
 
+echo "Recovery OS: ${RECOVERY_OS_BASE}"
+echo "Main OS:     ${MAIN_OS_BASE}"
 
-# Filenames without extensions
-RECOVERY_OS_IMG=${RECOVERY_OS%.*}
-RECOVERY_OS_BASE=${RECOVERY_OS_IMG%.*}
-MAIN_OS_IMG=${MAIN_OS%.*}
-MAIN_OS_BASE=${MAIN_OS_IMG%.*}
-
-
-echo Target version for recovery partition is $RECOVERY_OS
-echo Target version for root partition is $MAIN_OS
-
-# Do we have an img for main os? otherwise download
-if [ ! -f "./tmp/$MAIN_OS_BASE.img" ]; then
-  echo $MAIN_OS_IMG not found
-  if [ ! -f "./tmp/$MAIN_OS" ]; then
-    echo $MAIN_OS not found, downloading
-    curl -L $MAIN_OS_URL --output ./tmp/$MAIN_OS
-  fi
-  echo Unzipping $MAIN_OS
-  unxz ./tmp/$MAIN_OS -c > ./tmp/$MAIN_OS_IMG
+# Download images (deduplicates if both are the same file)
+if [ "$RECOVERY_OS" = "$MAIN_OS" ]; then
+  download_or_use "$MAIN_OS_BASE" "$MAIN_OS_URL"
+  RECOVERY_OS_BASE="${MAIN_OS_BASE}-recovery"
+  [ ! -f "${WORKDIR}/${RECOVERY_OS_BASE}.img" ] && \
+    cp "${WORKDIR}/${MAIN_OS_BASE}.img" "${WORKDIR}/${RECOVERY_OS_BASE}.img"
 else
-  echo $MAIN_OS_IMG found
+  download_or_use "$RECOVERY_OS_BASE" "$RECOVERY_OS_URL"
+  download_or_use "$MAIN_OS_BASE" "$MAIN_OS_URL"
 fi
 
-# create hardlink with different name if recovery and main os are the same
-if [ $RECOVERY_OS == $MAIN_OS ]; then
-  RECOVERY_OS_BASE=${MAIN_OS_BASE}-recovery
-  RECOVERY_OS_IMG=${RECOVERY_OS_BASE}.img
-  RECOVERY_OS=${RECOVERY_OS_IMG}.xz
-  if [ ! -f ./tmp/${RECOVERY_OS_IMG} ]; then
-    ln ./tmp/$MAIN_OS_IMG ./tmp/${RECOVERY_OS_IMG}
-  fi
-fi
+# ==================== CALCULATE PARTITIONS ====================
+echo "Calculating partitions..."
 
- 
-# Do we have an img for recovery os? otherwise download
-if [ ! -f "./tmp/$RECOVERY_OS_IMG" ]; then
-  echo $RECOVERY_OS_IMG not found
-  if [ ! -f "./tmp/$RECOVERY_OS" ]; then
-    echo $RECOVERY_OS not found, downloading
-    curl -L $RECOVERY_OS_URL --output ./tmp/$RECOVERY_OS
-  fi
-  echo Unzipping $RECOVERY_OS
-  unxz ./tmp/$RECOVERY_OS -c > ./tmp/$RECOVERY_OS_IMG
-else
-  echo $RECOVERY_OS_BASE.img found
-fi
+# Boot partition (partition 1) info
+RECOVERY_BOOT_START=$(get_fdisk_field "${WORKDIR}/${RECOVERY_OS_BASE}.img" 1 2)   # start sector
+RECOVERY_BOOT_LEN=$(get_fdisk_field "${WORKDIR}/${RECOVERY_OS_BASE}.img" 1 4)    # length
+MAIN_BOOT_LEN=$(get_fdisk_field "${WORKDIR}/${MAIN_OS_BASE}.img" 1 4)            # FIXED: was -f 2
 
+# Root partition (partition 2) info
+RECOVERY_ROOT_LEN=$(get_fdisk_field "${WORKDIR}/${RECOVERY_OS_BASE}.img" 2 4)
+MAIN_ROOT_LEN=$(get_fdisk_field "${WORKDIR}/${MAIN_OS_BASE}.img" 2 4)
 
+# Partition sizes and layout
+P1_SIZE=$RECOVERY_BOOT_LEN
+P2_SIZE=$((RECOVERY_ROOT_LEN + MAIN_ROOT_LEN))
+P3_SIZE=$MAIN_ROOT_LEN
+TOTAL_SECTORS=$((P1_SIZE + MAIN_BOOT_LEN + P2_SIZE + P3_SIZE))
+IMAGE_MB=$(( (TOTAL_SECTORS * 512 / 4194304) + 1 ))
 
-calculate_partitions() {
-  # calculate sizes in sectors
-  RECOVERY_BOOT_START=$(fdisk -lu ./tmp/$RECOVERY_OS_BASE.img | grep .img1 |  tr -d \* | sed -n "s/ \+/ /gp" | cut -d ' ' -f 2)
-  RECOVERY_BOOT_LENGTH=$(fdisk -lu ./tmp/$RECOVERY_OS_BASE.img | grep .img1 |  tr -d \* | sed -n "s/ \+/ /gp" | cut -d ' ' -f 4)
+echo "Image size: ~${IMAGE_MB} MB"
 
-  MAIN_BOOT_START=$(fdisk -lu ./tmp/$MAIN_OS_BASE.img | grep .img1 |  tr -d \* | sed -n "s/ \+/ /gp" | cut -d ' ' -f 2)
-  MAIN_BOOT_LENGTH=$(fdisk -lu ./tmp/$MAIN_OS_BASE.img | grep .img1 |  tr -d \* | sed -n "s/ \+/ /gp" | cut -d ' ' -f 2)
-  
-  RECOVERY_ROOT_LENGTH=$(fdisk -lu ./tmp/$RECOVERY_OS_BASE.img | grep .img2 |  tr -d \* | sed -n "s/ \+/ /gp" | cut -d ' ' -f 4)
+# ==================== CREATE IMAGE ====================
+echo "Creating restore image..."
+dd if=/dev/zero of="${WORKDIR}/${MAIN_OS_BASE}.restore.img" bs=4M count="$IMAGE_MB" status=progress
 
-  MAIN_ROOT_LENGTH=$(fdisk -lu ./tmp/$MAIN_OS_BASE.img | grep .img2 |  tr -d \* | sed -n "s/ \+/ /gp" | cut -d ' ' -f 4)
+UUID_RESTORE=$(uuidgen)
+UUID_ROOTFS=$(uuidgen)
+PARTUUID=$(tr -dc 'a-f0-9' < /dev/urandom 2>/dev/null | head -c8)
 
-
-  PARTITION_1=$RECOVERY_BOOT_LENGTH
-  PARTITION_1b=$MAIN_BOOT_LENGTH
-  PARTITION_2=$((RECOVERY_ROOT_LENGTH+MAIN_ROOT_LENGTH))
-  PARTITION_3=$MAIN_ROOT_LENGTH
-
-  SECTORS=$((PARTITION_1+PARTITION_1b+PARTITION_2+PARTITION_3))
-  IMAGE_4MB=$((((SECTORS * 512) / 4194304) + 1))
-  
-  IMAGE_BYTES=$((IMAGE_4MB * 4194304))
-  
-  dd if=/dev/zero bs=4M count=$IMAGE_4MB status=progress > ./tmp/$MAIN_OS_BASE.restore.img
-  
-  UUID_RESTORE=$(uuidgen)
-  UUID_ROOTFS=$(uuidgen)
-  PARTUUID=$(tr -dc 'a-f0-9' < /dev/urandom 2>/dev/null | head -c8)
-  PARTITION_1_START=$RECOVERY_BOOT_START
-  PARTITION_2_START=$((PARTITION_1_START + PARTITION_1))
-  PARTITION_3_START=$((PARTITION_2_START + PARTITION_2))
-}
-calculate_partitions
-
-# create partitions
-sfdisk ./tmp/$MAIN_OS_BASE.restore.img <<EOF
+# Partition layout:
+# p1: Recovery boot
+# p2: Recovery root  (+ main boot space reserved)
+# p3: Main root
+sfdisk "${WORKDIR}/${MAIN_OS_BASE}.restore.img" <<EOF
 label: dos
 label-id: 0x${PARTUUID}
 unit: sectors
-
-$MAIN_OS_BASE.img1 : start=${PARTITION_1_START}, size=${PARTITION_1}, type=c
-$MAIN_OS_BASE.img2 : start=${PARTITION_2_START}, size=${PARTITION_2}, type=83
-$MAIN_OS_BASE.img3 : start=${PARTITION_3_START}, size=${PARTITION_3}, type=83
+1 : start=${RECOVERY_BOOT_START}, size=${P1_SIZE}, type=c
+2 : start=$((RECOVERY_BOOT_START + P1_SIZE)), size=${P2_SIZE}, type=83
+3 : start=$((RECOVERY_BOOT_START + P1_SIZE + P2_SIZE)), size=${P3_SIZE}, type=83
 EOF
 
+# ==================== SETUP LOOP DEVICES ====================
+echo "Setting up loop devices..."
+losetup -v -f "${WORKDIR}/${MAIN_OS_BASE}.restore.img"
+losetup -v -f "${WORKDIR}/${RECOVERY_OS_BASE}.img"
+losetup -v -f "${WORKDIR}/${MAIN_OS_BASE}.img"
 
-# Mount images as devices
-losetup -v -f ./tmp/$MAIN_OS_BASE.restore.img
-losetup -v -f ./tmp/$RECOVERY_OS_BASE.img
-losetup -v -f ./tmp/$MAIN_OS_BASE.img
+BLANK_LOOP=$(losetup -j "${WORKDIR}/${MAIN_OS_BASE}.restore.img" | grep -o '[0-9]*' | head -1)
+RECOVERY_LOOP=$(losetup -j "${WORKDIR}/${RECOVERY_OS_BASE}.img" | grep -o '[0-9]*' | head -1)
+MAIN_LOOP=$(losetup -j "${WORKDIR}/${MAIN_OS_BASE}.img" | grep -o '[0-9]*' | head -1)
 
-BLANK_IMAGE_LOOPDEV=$(losetup -a | grep loop | grep $MAIN_OS_BASE.restore.img | cut -d ' ' -f 1 | tr -dc '0-9')
-kpartx -v -a /dev/loop$BLANK_IMAGE_LOOPDEV
+kpartx -v -a "/dev/loop${BLANK_LOOP}"
+kpartx -v -a "/dev/loop${RECOVERY_LOOP}"
+kpartx -v -a "/dev/loop${MAIN_LOOP}"
 
-RECOVERY_IMAGE_LOOPDEV=$(losetup -a | grep loop | grep $RECOVERY_OS_BASE.img | cut -d ' ' -f 1 | tr -dc '0-9')
-kpartx -v -a /dev/loop$RECOVERY_IMAGE_LOOPDEV
+# ==================== COPY DATA ====================
+echo "Copying data to partitions..."
+dd if="/dev/mapper/loop${RECOVERY_LOOP}p1" of="/dev/mapper/loop${BLANK_LOOP}p1" bs=4M status=progress
+dd if="/dev/mapper/loop${RECOVERY_LOOP}p2" of="/dev/mapper/loop${BLANK_LOOP}p2" bs=4M status=progress
+dd if="/dev/mapper/loop${MAIN_LOOP}p2" of="/dev/mapper/loop${BLANK_LOOP}p3" bs=4M status=progress
 
-MAIN_IMAGE_LOOPDEV=$(losetup -a | grep loop | grep $MAIN_OS_BASE.img | cut -d ' ' -f 1 | tr -dc '0-9')
-kpartx -v -a /dev/loop$MAIN_IMAGE_LOOPDEV
+# ==================== CONFIGURE FILESYSTEMS ====================
+echo "Configuring partitions..."
+tune2fs "/dev/mapper/loop${BLANK_LOOP}p2" -U "$UUID_RESTORE"
+e2label "/dev/mapper/loop${BLANK_LOOP}p2" recoveryfs
+e2fsck -y -f "/dev/mapper/loop${BLANK_LOOP}p3"
+tune2fs "/dev/mapper/loop${BLANK_LOOP}p3" -U "$UUID_ROOTFS"
+e2fsck -pf "/dev/mapper/loop${BLANK_LOOP}p2"
+resize2fs "/dev/mapper/loop${BLANK_LOOP}p2"
 
-# Copying boot partition
-dd if=/dev/mapper/loop${RECOVERY_IMAGE_LOOPDEV}p1 of=/dev/mapper/loop${BLANK_IMAGE_LOOPDEV}p1 status=progress bs=4M
-echo Copying Raspbian Lite to partition 2
-dd if=/dev/mapper/loop${RECOVERY_IMAGE_LOOPDEV}p2 of=/dev/mapper/loop${BLANK_IMAGE_LOOPDEV}p2 status=progress bs=4M
-echo Copying Raspbian Full to partition 3
-dd if=/dev/mapper/loop${MAIN_IMAGE_LOOPDEV}p2 of=/dev/mapper/loop${BLANK_IMAGE_LOOPDEV}p3 status=progress bs=4M
+# ==================== MOUNT AND CONFIGURE ====================
+echo "Mounting partitions..."
+RECOVERY_BOOT_MOUNT="${WORKDIR}/mnt/restore_boot"
+RECOVERY_ROOT_MOUNT="${WORKDIR}/mnt/restore_recovery"
+ROOTFS_MOUNT="${WORKDIR}/mnt/restore_rootfs"
+mkdir -p "$RECOVERY_BOOT_MOUNT" "$RECOVERY_ROOT_MOUNT" "$ROOTFS_MOUNT"
 
-# This seems to be needed to let the system catch up
-sleep 5
+mount "/dev/mapper/loop${BLANK_LOOP}p1" "$RECOVERY_BOOT_MOUNT"
+mount "/dev/mapper/loop${BLANK_LOOP}p2" "$RECOVERY_ROOT_MOUNT"
+mount "/dev/mapper/loop${BLANK_LOOP}p3" "$ROOTFS_MOUNT"
 
-# Setting IDs
-tune2fs /dev/mapper/loop${BLANK_IMAGE_LOOPDEV}p2 -U ${UUID_RESTORE}
-e2label /dev/mapper/loop${BLANK_IMAGE_LOOPDEV}p2 recoveryfs
-e2fsck -y -f /dev/mapper/loop${BLANK_IMAGE_LOOPDEV}p3
-tune2fs /dev/mapper/loop${BLANK_IMAGE_LOOPDEV}p3 -U ${UUID_ROOTFS}
+echo "Configuring boot files..."
 
-# Expanding recovery partition to full size
-e2fsck -pf /dev/mapper/loop${BLANK_IMAGE_LOOPDEV}p2
-resize2fs /dev/mapper/loop${BLANK_IMAGE_LOOPDEV}p2
+# cmdline.txt - point root to USB partition 3
+sed -i -r "s|PARTUUID=.*\-02|${DEVICE}p3|" "$RECOVERY_BOOT_MOUNT/cmdline.txt"
 
-# mount filesystems
-mkdir -p tmp/mnt/restore_boot
-mkdir -p tmp/mnt/restore_recovery
-mkdir -p tmp/mnt/restore_rootfs
+# Generate boot UUID for fstab
+BOOT_UUID=$(blkid -o export "/dev/mapper/loop${BLANK_LOOP}p1" | grep '^UUID=' | cut -d'=' -f2)
 
-echo Mounting boot
-mount /dev/mapper/loop${BLANK_IMAGE_LOOPDEV}p1 tmp/mnt/restore_boot
-echo Mounting recovery
-mount /dev/mapper/loop${BLANK_IMAGE_LOOPDEV}p2 tmp/mnt/restore_recovery
-echo Mounting rootfs
-mount /dev/mapper/loop${BLANK_IMAGE_LOOPDEV}p3 tmp/mnt/restore_rootfs
-
-sleep 1
-
-# Set boot partition to new ID and partition 3
-sed -i -r "s|(PARTUUID=.*?\-02)|/dev/mmcblk0p3|g" tmp/mnt/restore_boot/cmdline.txt
-echo Done
-
-# Fix fstabs
-UUID_BOOT=$(blkid -o export /dev/mapper/loop${BLANK_IMAGE_LOOPDEV}p1 | egrep '^UUID=' | cut -d'=' -f2)
-# write fstab
-cat << EOF > ./tmp/mnt/restore_rootfs/etc/fstab
-proc                     /proc  proc    defaults          0       0
-/dev/mmcblk0p1  /boot/firmware  vfat    defaults          0       2
-/dev/mmcblk0p3  /      ext4    defaults,noatime  0       1
+# Write rootfs fstab
+cat > "${ROOTFS_MOUNT}/etc/fstab" <<EOF
+proc             /proc   proc  defaults       0  0
+${DEVICE}p1      ${BOOT_MOUNT}  vfat  defaults       0  2
+${DEVICE}p3      /       ext4  defaults,noatime 0  1
 EOF
 
-# Writing recovery fstab
-cat << EOF > ./tmp/mnt/restore_recovery/etc/fstab
-proc                    /proc  proc    defaults          0       0
-/dev/mmcblk0p1       /boot/firmware  vfat    defaults          0       2
-/dev/mmcblk0p2    /      ext4    defaults,noatime  0       1
+# Write recovery fstab
+cat > "${RECOVERY_ROOT_MOUNT}/etc/fstab" <<EOF
+proc             /proc   proc  defaults       0  0
+${DEVICE}p1      ${BOOT_MOUNT}  vfat  defaults       0  2
+${DEVICE}p2      /       ext4  defaults,noatime 0  1
 EOF
 
-# copy scripts 
-cp custom.toml ./tmp/mnt/restore_boot/custom.toml.bak # used for recovery original script will be deleted after first boot
+# Copy helper scripts to boot partition
+cp custom.toml               "${RECOVERY_BOOT_MOUNT}/custom.toml.bak"
+cp boot_to_recovery          "${RECOVERY_BOOT_MOUNT}/"
+cp boot_to_root              "${RECOVERY_BOOT_MOUNT}/"
+cp restore_root              "${RECOVERY_BOOT_MOUNT}/"
+cp check_restore_gpio.py     "${RECOVERY_BOOT_MOUNT}/"
 
-echo copy boot_to_recovery
-cp boot_to_recovery ./tmp/mnt/restore_boot/
+# Add auto-restore in recovery partition 
+cat > "${ROOTFS_MOUNT}/etc/systemd/system/restore-root.service" <<EOF
+[Unit]
+Description=Restore RootFS from USB
+DefaultDependencies=no
+After=local-fs.target
+Before=basic.target
 
-echo copy boot_to_root
-cp boot_to_root ./tmp/mnt/restore_boot/
+[Service]
+Type=oneshot
+ExecStart=/boot/firmware/restore_root
+RemainAfterExit=yes
 
-echo copy restore_root
-cp restore_root ./tmp/mnt/restore_boot/
+[Install]
+WantedBy=basic.target
+EOF
+# Create symlink manually (systemctl doesn't exist in this container)
+mkdir -p "${ROOTFS_MOUNT}/etc/systemd/system/basic.target.wants"
+ln -sf "../restore-root.service" "${ROOTFS_MOUNT}/etc/systemd/system/basic.target.wants/restore-root.service"
 
-echo copy check_restore_gpio
-cp check_restore_gpio.py ./tmp/mnt/restore_boot/
+# Backup firstrun.sh for recovery (raspberrypi-sys-mods)
+# Note: these match fixed paths in the file, use double quotes to expand $BOOT_MOUNT
+sed -i "/^mount \/boot\$/a cp /${BOOT_MOUNT}/firstrun.sh /${BOOT_MOUNT}/firstrun.bak" \
+  "${ROOTFS_MOUNT}/usr/lib/raspberrypi-sys-mods/firstboot"
+sed -i "/^mount \"\$FWLOC\" -o rw\$/a cp /${BOOT_MOUNT}/firstrun.sh /${BOOT_MOUNT}/firstrun.bak" \
+  "${ROOTFS_MOUNT}/usr/lib/raspberrypi-sys-mods/firstboot"
 
-# modifying rc.locals
-sed -i '$ i /boot/firmware/restore_root' ./tmp/mnt/restore_recovery/etc/rc.local
-sed -i '$ i python3 /boot/firmware/check_restore_gpio.py' ./tmp/mnt/restore_rootfs/etc/rc.local
+# Create recovery rootfs image from partition 3
+echo "Creating recovery rootfs image..."
+dd if="/dev/mapper/loop${BLANK_LOOP}p3" of="${RECOVERY_ROOT_MOUNT}/rootfs.img" bs=4M status=progress
 
-# Modify raspberry-pi-sys-mods
-# needed to make the image compatible with new imager customisation feature
-# backup firstrun.sh for reuse after recovery
-sed -i '/^mount \/boot$/a cp /boot/firmware/firstrun.sh /boot/firmware/firstrun.bak' ./tmp/mnt/restore_rootfs/usr/lib/raspberrypi-sys-mods/firstboot
-sed -i '/^mount "$FWLOC" -o rw$/a cp /boot/firmware/firstrun.sh /boot/firmware/firstrun.bak' ./tmp/mnt/restore_rootfs/usr/lib/raspberrypi-sys-mods/firstboot
+echo ""
+echo "=== Done! ==="
+echo "Image: ${WORKDIR}/${MAIN_OS_BASE}.restore.img"
+echo "Recovery image: ${RECOVERY_ROOT_MOUNT}/rootfs.img"
 
-# write image
-dd if=/dev/mapper/loop${BLANK_IMAGE_LOOPDEV}p3 of=./tmp/mnt/restore_recovery/rootfs.img status=progress bs=4M
-
-# unmounting ...
-umount tmp/mnt/restore_boot
-umount tmp/mnt/restore_recovery
-umount tmp/mnt/restore_rootfs
-sleep 1
-kpartx -v -d /dev/loop${BLANK_IMAGE_LOOPDEV}
-kpartx -v -d /dev/loop${RECOVERY_IMAGE_LOOPDEV}
-kpartx -v -d /dev/loop${MAIN_IMAGE_LOOPDEV}
-losetup --detach-all
-echo Done
