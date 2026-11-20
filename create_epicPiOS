@@ -42,13 +42,6 @@ download_or_use() {
   unxz "$archive" -c > "$img"
 }
 
-# Extract field N from fdisk -lu output for partition P
-get_fdisk_field() {
-  local base
-  base=$(basename "$1")
-  fdisk -lu "$1" | grep -F "${base}${2}" | tr -d '*' | tr -s ' ' | cut -d' ' -f"$3"
-}
-
 # Cleanup loop devices and mounts on exit (success or failure)
 cleanup() {
   echo "Cleaning up..."
@@ -113,35 +106,25 @@ else
   download_or_use "$MAIN_OS_BASE" "$MAIN_OS_URL"
 fi
 
-# ==================== CALCULATE PARTITIONS ====================
-echo "Calculating partitions..."
+# ==================== FIXED PARTITION SIZES ====================
+echo "Using fixed partition sizes..."
 
-# Boot partition info from the OS images (both should have same boot partition size)
-RECOVERY_BOOT_START=$(get_fdisk_field "${WORKDIR}/${RECOVERY_OS_BASE}.img" 1 2)   # start sector
-RECOVERY_BOOT_LEN=$(get_fdisk_field "${WORKDIR}/${RECOVERY_OS_BASE}.img" 1 4)    # length
-# Use the larger of recovery/main boot partition size for both boot partitions
-MAIN_BOOT_LEN=$(get_fdisk_field "${WORKDIR}/${MAIN_OS_BASE}.img" 1 4)
-BOOT_SIZE=$( [ "$RECOVERY_BOOT_LEN" -gt "$MAIN_BOOT_LEN" ] && echo "$RECOVERY_BOOT_LEN" || echo "$MAIN_BOOT_LEN" )
+# Fixed sizes in sectors (512 bytes per sector)
+P1_SIZE=1048576    # Boot A: 512 MB
+P2_SIZE=1048576    # Boot B: 512 MB
+P3_SIZE=8388608    # Rootfs: 4 GB (big enough for Pi OS + customizations)
+P4_SIZE=4194304    # Overlay: 2 GB (enough for logs, configs, packages)
 
-# Root partition info from the main OS image
-MAIN_ROOT_LEN=$(get_fdisk_field "${WORKDIR}/${MAIN_OS_BASE}.img" 2 4)            # root partition size
-
-# New 4-partition layout (MBR compatible):
-# p1: Boot A   (FAT32) — base kernel/dtbs/firmware
-# p2: Boot B   (FAT32) — updated kernel/dtbs/firmware after kernel updates
-# p3: Rootfs   (ext4) — Pi OS Trixie + customizations (read-write on first boot)
-# p4: Overlay  (ext4, rw) — runtime changes, logs, configs
-P1_SIZE=$BOOT_SIZE        # Boot A
-P2_SIZE=$BOOT_SIZE        # Boot B (same size as Boot A)
-P3_SIZE=$((MAIN_ROOT_LEN + 524288))   # Rootfs + 256MB buffer (524288 sectors = 256MB)
-# Source image total sectors (fdisk reported size)
-SOURCE_TOTAL_SECTORS=$(fdisk -lu "${WORKDIR}/${MAIN_OS_BASE}.img" | tail -1 | tr -d '*' | tr -s ' ' | cut -d' ' -f2)
-# New image: source size + 512M (boot_b) + 256M (rootfs buffer)
-TOTAL_SECTORS=$((SOURCE_TOTAL_SECTORS + BOOT_SIZE + 524288))
-P4_SIZE=$((TOTAL_SECTORS - RECOVERY_BOOT_START - P1_SIZE - P2_SIZE - P3_SIZE))
+# Calculate total image size
+TOTAL_SECTORS=$((P1_SIZE + P2_SIZE + P3_SIZE + P4_SIZE))
 IMAGE_MB=$(( (TOTAL_SECTORS * 512 / 4194304) + 1 ))
 
-echo "Image size: ~${IMAGE_MB} MB"
+echo "Partition sizes:"
+echo "  Boot A:   ${P1_SIZE} sectors (${P1_SIZE * 512 / 1048576} MB)"
+echo "  Boot B:   ${P2_SIZE} sectors (${P2_SIZE * 512 / 1048576} MB)"
+echo "  Rootfs:   ${P3_SIZE} sectors (${P3_SIZE * 512 / 1048576} MB)"
+echo "  Overlay:  ${P4_SIZE} sectors (${P4_SIZE * 512 / 1048576} MB)"
+echo "Total image size: ~${IMAGE_MB} MB"
 
 # ==================== CREATE IMAGE ====================
 echo "Creating image..."
@@ -155,10 +138,10 @@ sfdisk "${WORKDIR}/${MAIN_OS_BASE}.restore.img" <<EOF
 label: dos
 label-id: 0x${PARTUUID}
 unit: sectors
-1 : start=${RECOVERY_BOOT_START}, size=${P1_SIZE}, type=c
-2 : start=$((RECOVERY_BOOT_START + P1_SIZE)), size=${P2_SIZE}, type=c
-3 : start=$((RECOVERY_BOOT_START + P1_SIZE + P2_SIZE)), size=${P3_SIZE}, type=83
-4 : start=$((RECOVERY_BOOT_START + P1_SIZE + P2_SIZE + P3_SIZE)), size=${P4_SIZE}, type=83
+1 : start=2048, size=${P1_SIZE}, type=c
+2 : start=$((2048 + P1_SIZE)), size=${P2_SIZE}, type=c
+3 : start=$((2048 + P1_SIZE + P2_SIZE)), size=${P3_SIZE}, type=83
+4 : start=$((2048 + P1_SIZE + P2_SIZE + P3_SIZE)), size=${P4_SIZE}, type=83
 EOF
 
 # ==================== SETUP LOOP DEVICES ====================
@@ -354,7 +337,7 @@ mkdir -p "${ROOTFS_MOUNT}/boot/b"
 
 # ---- Backup firstrun.sh for recovery (raspberrypi-sys-mods) ----
 if [ -f "${ROOTFS_MOUNT}/usr/lib/raspberrypi-sys-mods/firstboot" ]; then
-  sed -i "/^mount \\\/boot\\$/a cp /${BOOT_MOUNT}/firstrun.sh /${BOOT_MOUNT}/firstrun.bak" \
+  sed -i "/^mount \\/boot\\$/a cp /${BOOT_MOUNT}/firstrun.sh /${BOOT_MOUNT}/firstrun.bak" \
     "${ROOTFS_MOUNT}/usr/lib/raspberrypi-sys-mods/firstboot"
   sed -i "/^mount \\\"\$FWLOC\\\" -o rw\\$/a cp /${BOOT_MOUNT}/firstrun.sh /${BOOT_MOUNT}/firstrun.bak" \
     "${ROOTFS_MOUNT}/usr/lib/raspberrypi-sys-mods/firstboot"
@@ -372,17 +355,17 @@ echo "=== Done! ==="
 echo "Image: ${WORKDIR}/${MAIN_OS_BASE}.restore.img"
 echo "Device used: ${DEVICE}"
 echo "Partition layout:"
-echo "  p1 (boot_a):      ${P1_SIZE} sectors   (FAT32)"
-echo "  p2 (base rootfs): ${P2_SIZE} sectors   (ext4, read-only)"
-echo "  p3 (overlay):     ${P3_SIZE} sectors   (ext4, mounted on p2 via overlayfs)"
-echo "  p4 (boot_b):      ${P4_SIZE} sectors   (FAT32)"
+echo "  p1 (boot_a):    ${P1_SIZE} sectors (${P1_SIZE * 512 / 1048576} MB)   (FAT32)"
+echo "  p2 (boot_b):    ${P2_SIZE} sectors (${P2_SIZE * 512 / 1048576} MB)   (FAT32)"
+echo "  p3 (rootfs):    ${P3_SIZE} sectors (${P3_SIZE * 512 / 1048576} MB)   (ext4, read-write)"
+echo "  p4 (overlay):   ${P4_SIZE} sectors (${P4_SIZE * 512 / 1048576} MB)   (ext4, wiped for reset)"
 echo ""
 echo "Boot behavior:"
 echo "  - Boot mounts p2 (base rootfs) read-only"
-echo "  - overlayroot mounts p3 as writable overlay on top"
-echo "  - All changes (logs, configs, packages) go to p3"
-echo "  - Rebooting preserves p2, p3 survives"
-echo "  - Factory reset: wipe p3, reboot (restores to customized p2)"
+echo "  - overlayroot mounts p4 as writable overlay on top"
+echo "  - All changes (logs, configs, packages) go to p4"
+echo "  - Rebooting preserves p2, p4 survives"
+echo "  - Factory reset: wipe p4, reboot (restores to customized p2)"
 echo "  - Kernel update: new files copied to other boot partition, autoboot.txt toggled"
 echo ""
 echo "To flash:"
