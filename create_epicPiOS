@@ -109,21 +109,24 @@ fi
 # ==================== FIXED PARTITION SIZES ====================
 echo "Using fixed partition sizes..."
 
-# Fixed sizes in sectors (512 bytes per sector)
+# Total image size
+TOTAL_MB=12288
+TOTAL_SECTORS=$((TOTAL_MB * 1024 * 1024 / 512))
+
+# Fixed sizes: P1, P2, P3 are big enough
 P1_SIZE=1048576    # Boot A: 512 MB
 P2_SIZE=1048576    # Boot B: 512 MB
 P3_SIZE=8388608    # Rootfs: 4 GB (big enough for Pi OS + customizations)
-P4_SIZE=4194304    # Overlay: 2 GB (enough for logs, configs, packages)
 
-# Calculate total image size
-TOTAL_SECTORS=$((P1_SIZE + P2_SIZE + P3_SIZE + P4_SIZE))
+# P4: everything remaining
+P4_SIZE=$((TOTAL_SECTORS - P1_SIZE - P2_SIZE - P3_SIZE))
 IMAGE_MB=$(( (TOTAL_SECTORS * 512 / 4194304) + 1 ))
 
 echo "Partition sizes:"
 echo "  Boot A:   ${P1_SIZE} sectors (${P1_SIZE * 512 / 1048576} MB)"
 echo "  Boot B:   ${P2_SIZE} sectors (${P2_SIZE * 512 / 1048576} MB)"
 echo "  Rootfs:   ${P3_SIZE} sectors (${P3_SIZE * 512 / 1048576} MB)"
-echo "  Overlay:  ${P4_SIZE} sectors (${P4_SIZE * 512 / 1048576} MB)"
+echo "  Overlay:  ${P4_SIZE} sectors ($((P4_SIZE * 512 / 1048576)) MB) (all remaining)"
 echo "Total image size: ~${IMAGE_MB} MB"
 
 # ==================== CREATE IMAGE ====================
