@@ -260,9 +260,9 @@ PARTUUID=${BOOT_A_PARTUUID}  ${BOOT_MOUNT}  vfat  defaults       0  2
 EOF
 
 # ---- Cloud-init vendor-data: install overlayroot and configure initramfs ----
-# Write vendor-data to /boot/firmware/vendor-data on BOOT_A so that when the
-# device first boots, cloud-init will execute it and set up overlayroot.
-cat > "${BOOT_A_MOUNT}/vendor-data" <<'EOF'
+# Write vendor-data to cloud-init seed dir on rootfs so it's picked up on first boot
+mkdir -p "${ROOTFS_MOUNT}/var/lib/cloud/seed/nocloud"
+cat > "${ROOTFS_MOUNT}/var/lib/cloud/seed/nocloud/vendor-data" <<'EOF'
 #cloud-config
 runcmd:
   - |-
@@ -298,10 +298,7 @@ runcmd:
       reboot
     fi
 EOF
-
-# Ensure the vendor-data file will not be consumed during build-time boot
-# by keeping it in a known location that cloud-init ignores until first boot
-echo "Vendor-data written to ${BOOT_A_MOUNT}/vendor-data"
+echo "Vendor-data written to rootfs cloud-init seed dir"
 
 # ---- Copy helper scripts to boot A partition ----
 cp custom.toml               "${BOOT_A_MOUNT}/custom.toml"
