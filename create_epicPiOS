@@ -276,9 +276,15 @@ runcmd:
     update-initramfs -u 2>/dev/null || true
 
     # Copy updated initramfs to the other boot partition
-    if mountpoint -q /boot/b; then
-      cp /boot/firmware/initrd.img* /boot/b/ 2>/dev/null && echo "[PiOpsOS] Copied initramfs to /boot/b"
+    # /boot/b is just a directory on rootfs — we must mount the boot_b partition by label
+    mkdir -p /tmp/boot_b
+    if mount -o ro /dev/disk/by-label/boot_b /tmp/boot_b 2>/dev/null; then
+      cp /boot/firmware/initrd.img* /tmp/boot_b/ 2>/dev/null && echo "[PiOpsOS] Copied initramfs to boot_b"
+      umount /tmp/boot_b
+    else
+      echo "[PiOpsOS] WARN: Could not mount boot_b partition (may already be in use)"
     fi
+    rmdir /tmp/boot_b
 
     # Reboot so p2 boots with the updated initramfs (overlayroot active)
     reboot
