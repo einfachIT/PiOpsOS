@@ -35,8 +35,7 @@ cleanup() {
   echo "Cleaning up..."
 
   # 1. Unmount all mount points first (before kpartx/losetup)
-  for m in "$SHARED_BOOT_MOUNT" "$SLOT_A_BOOT_MOUNT" "$SLOT_A_ROOTFS_MOUNT" \
-           "$SLOT_B_BOOT_MOUNT" "$SLOT_B_ROOTFS_MOUNT"; do
+  for m in "$BOOT_MOUNT_MOUNT" "$ROOTFS_MOUNT" "$OVERLAY_MOUNT" "$ROLLBACK_MOUNT"; do
     if mountpoint -q "$m" 2>/dev/null; then
       umount "$m" 2>/dev/null || true
     fi
@@ -44,7 +43,7 @@ cleanup() {
 
   sleep 2  # Give kernel time to release devices
 
-  # 2. Remove kpartx mappings (loopXXp1, loopXXp2, ...)
+  # 2. Remove kpartx mappings
   losetup -a | grep -E '\.(restore|lite|img)$' | cut -d: -f1 | while read -r dev; do
     kpartx -d "$dev" 2>/dev/null || true
   done
@@ -68,10 +67,10 @@ trap cleanup EXIT
 # ==================== INSTALL SOFTWARE====================
 export DEBIAN_FRONTEND=noninteractive
 apt update
-apt install -y uuid-runtime parted curl unzip kpartx xz-utils fdisk
+apt install -y uuid-runtime parted curl unzip kpartx xz-utils fdisk e2fsprogs
 
 # ==================== PREPARATION ====================
-echo "=== A/B Boot Image Builder (USB/NVMe + Trixie compatible) ==="
+echo "=== OverlayFS A/B Boot Image Builder (USB/NVMe + Trixie compatible) ==="
 mkdir -p "$WORKDIR"
 
 # Accept URLs from args or prompt
@@ -110,18 +109,16 @@ MAIN_BOOT_LEN=$(get_fdisk_field "${WORKDIR}/${MAIN_OS_BASE}.img" 1 4)           
 # Root partition (partition 2) info from the OS images
 MAIN_ROOT_LEN=$(get_fdisk_field "${WORKDIR}/${MAIN_OS_BASE}.img" 2 4)            # root partition size from main OS
 
-# A/B Dual Boot Partition Layout (5 partitions):
-# p1: Shared boot partition (FAT32)   — bootloader, config.txt, kernel, scripts, autoboot.txt
-# p2: Slot A boot partition (FAT32)   — cmdline.txt pointing to Root A (p3)
-# p3: Slot A root filesystem (ext4)   — primary working system
-# p4: Slot B boot partition (FAT32)   — cmdline.txt pointing to Root B (p5)
-# p5: Slot B root filesystem (ext4)   — fallback/backup system
-P1_SIZE=$RECOVERY_BOOT_LEN       # Shared boot = recovery boot size
-P2_SIZE=$MAIN_BOOT_LEN           # Slot A boot = main OS boot size
-P3_SIZE=$MAIN_ROOT_LEN           # Slot A root = main OS root size
-P4_SIZE=$MAIN_BOOT_LEN           # Slot B boot = main OS boot size
-P5_SIZE=$MAIN_ROOT_LEN           # Slot B root = main OS root size
-TOTAL_SECTORS=$((RECOVERY_BOOT_START + P1_SIZE + P2_SIZE + P3_SIZE + P4_SIZE + P5_SIZE))
+# OverlayFS Partition Layout (4 partitions — MBR compatible):
+# p1: Boot partition (FAT32)         — bootloader, kernel, scripts, custom.toml
+# p2: Base rootfs (ext4, read-only)  — full Pi OS Trixie, immutable base system
+# p3: Overlay A (ext4, read-write)   — runtime changes, logs, configs (survives reboot)
+# p4: Overlay B (ext4, read-write)   — previous state, swap with p3 on rollback
+P1_SIZE=$RECOVERY_BOOT_LEN        # Boot partition = recovery boot size
+P2_SIZE=$MAIN_ROOT_LEN            # Base rootfs = main OS root size
+P3_SIZE=2097152                   # Overlay A = 1 GB (2 * 1024 * 1024 sectors)
+P4_SIZE=2097152                   # Overlay B = 1 GB (2 * 1024 * 1024 sectors)
+TOTAL_SECTORS=$((RECOVERY_BOOT_START + P1_SIZE + P2_SIZE + P3_SIZE + P4_SIZE))
 IMAGE_MB=$(( (TOTAL_SECTORS * 512 / 4194304) + 1 ))
 
 echo "Image size: ~${IMAGE_MB} MB"
@@ -130,20 +127,18 @@ echo "Image size: ~${IMAGE_MB} MB"
 echo "Creating restore image..."
 dd if=/dev/zero of="${WORKDIR}/${MAIN_OS_BASE}.restore.img" bs=4M count="$IMAGE_MB" status=progress
 
-UUID_ROOTFS_A=$(uuidgen)
-UUID_ROOTFS_B=$(uuidgen)
+UUID_BASE_ROOT=$(uuidgen)
 PARTUUID=$(tr -dc 'a-f0-9' < /dev/urandom 2>/dev/null | head -c8)
 
-# Partition layout (A/B dual boot per Raspberry Pi native bootloader docs)
+# Partition layout (4 partitions, MBR compatible)
 sfdisk "${WORKDIR}/${MAIN_OS_BASE}.restore.img" <<EOF
 label: dos
 label-id: 0x${PARTUUID}
 unit: sectors
 1 : start=${RECOVERY_BOOT_START}, size=${P1_SIZE}, type=c
-2 : start=$((RECOVERY_BOOT_START + P1_SIZE)), size=${P2_SIZE}, type=c
+2 : start=$((RECOVERY_BOOT_START + P1_SIZE)), size=${P2_SIZE}, type=83
 3 : start=$((RECOVERY_BOOT_START + P1_SIZE + P2_SIZE)), size=${P3_SIZE}, type=83
-4 : start=$((RECOVERY_BOOT_START + P1_SIZE + P2_SIZE + P3_SIZE)), size=${P4_SIZE}, type=c
-5 : start=$((RECOVERY_BOOT_START + P1_SIZE + P2_SIZE + P3_SIZE + P4_SIZE)), size=${P5_SIZE}, type=83
+4 : start=$((RECOVERY_BOOT_START + P1_SIZE + P2_SIZE + P3_SIZE)), size=${P4_SIZE}, type=83
 EOF
 
 # ==================== SETUP LOOP DEVICES ====================
@@ -163,123 +158,114 @@ kpartx -v -a "/dev/loop${MAIN_LOOP}"
 # ==================== COPY DATA ====================
 echo "Copying data to partitions..."
 
-# p1: Shared boot = recovery boot content
+# p1: Boot partition = recovery boot content
 dd if="/dev/mapper/loop${RECOVERY_LOOP}p1" of="/dev/mapper/loop${BLANK_LOOP}p1" bs=4M status=progress
 
-# p2: Slot A boot = copy shared boot (will get slot-specific cmdline.txt below)
-dd if="/dev/mapper/loop${RECOVERY_LOOP}p1" of="/dev/mapper/loop${BLANK_LOOP}p2" bs=4M status=progress
+# p2: Base rootfs = main OS root filesystem (read-only, immutable base)
+dd if="/dev/mapper/loop${MAIN_LOOP}p2" of="/dev/mapper/loop${BLANK_LOOP}p2" bs=4M status=progress
 
-# p3: Slot A root = main OS root filesystem
-dd if="/dev/mapper/loop${MAIN_LOOP}p2" of="/dev/mapper/loop${BLANK_LOOP}p3" bs=4M status=progress
+# p3: Overlay A — start empty (will fill during first boot)
+dd if=/dev/zero of="/dev/mapper/loop${BLANK_LOOP}p3" bs=4M count=0 status=none
 
-# p4: Slot B boot = copy shared boot (will get slot-specific cmdline.txt below)
-dd if="/dev/mapper/loop${RECOVERY_LOOP}p1" of="/dev/mapper/loop${BLANK_LOOP}p4" bs=4M status=progress
+# p4: Overlay B — start empty (backup state = factory state)
+dd if=/dev/zero of="/dev/mapper/loop${BLANK_LOOP}p4" bs=4M count=0 status=none
 
-# p5: Slot B root = main OS root filesystem
-dd if="/dev/mapper/loop${MAIN_LOOP}p2" of="/dev/mapper/loop${BLANK_LOOP}p5" bs=4M status=progress
+# ==================== FORMAT OVERLAY PARTITIONS ====================
+echo "Formatting overlay partitions..."
 
-# ==================== CONFIGURE FILESYSTEMS ====================
-echo "Configuring partitions..."
-
-# Label and set UUIDs for both root filesystems
-e2label "/dev/mapper/loop${BLANK_LOOP}p3" rootsa
-e2fsck -y -f "/dev/mapper/loop${BLANK_LOOP}p3"
-tune2fs "/dev/mapper/loop${BLANK_LOOP}p3" -U "$UUID_ROOTFS_A"
-
-e2label "/dev/mapper/loop${BLANK_LOOP}p5" rootsb
-e2fsck -y -f "/dev/mapper/loop${BLANK_LOOP}p5"
-tune2fs "/dev/mapper/loop${BLANK_LOOP}p5" -U "$UUID_ROOTFS_B"
+# Create ext4 filesystems for overlay partitions
+# These start empty — overlayroot manages them
+mkfs.ext4 -L "overlaya" "/dev/mapper/loop${BLANK_LOOP}p3"
+mkfs.ext4 -L "overlayb" "/dev/mapper/loop${BLANK_LOOP}p4"
 
 # ==================== MOUNT AND CONFIGURE ====================
 echo "Mounting partitions..."
-SHARED_BOOT_MOUNT="${WORKDIR}/mnt/shared_boot"
-SLOT_A_BOOT_MOUNT="${WORKDIR}/mnt/slot_a_boot"
-SLOT_A_ROOTFS_MOUNT="${WORKDIR}/mnt/slot_a_rootfs"
-SLOT_B_BOOT_MOUNT="${WORKDIR}/mnt/slot_b_boot"
-SLOT_B_ROOTFS_MOUNT="${WORKDIR}/mnt/slot_b_rootfs"
-mkdir -p "$SHARED_BOOT_MOUNT" "$SLOT_A_BOOT_MOUNT" "$SLOT_A_ROOTFS_MOUNT" "$SLOT_B_BOOT_MOUNT" "$SLOT_B_ROOTFS_MOUNT"
+BOOT_MOUNT_MOUNT="${WORKDIR}/mnt/boot"
+ROOTFS_MOUNT="${WORKDIR}/mnt/rootfs"
+OVERLAY_MOUNT="${WORKDIR}/mnt/overlay"
+ROLLBACK_MOUNT="${WORKDIR}/mnt/rollback"
 
-mount "/dev/mapper/loop${BLANK_LOOP}p1" "$SHARED_BOOT_MOUNT"
-mount "/dev/mapper/loop${BLANK_LOOP}p2" "$SLOT_A_BOOT_MOUNT"
-mount "/dev/mapper/loop${BLANK_LOOP}p3" "$SLOT_A_ROOTFS_MOUNT"
-mount "/dev/mapper/loop${BLANK_LOOP}p4" "$SLOT_B_BOOT_MOUNT"
-mount "/dev/mapper/loop${BLANK_LOOP}p5" "$SLOT_B_ROOTFS_MOUNT"
+mkdir -p "$BOOT_MOUNT_MOUNT" "$ROOTFS_MOUNT" "$OVERLAY_MOUNT" "$ROLLBACK_MOUNT"
+
+mount "/dev/mapper/loop${BLANK_LOOP}p1" "$BOOT_MOUNT_MOUNT"
+mount "/dev/mapper/loop${BLANK_LOOP}p2" "$ROOTFS_MOUNT"
+mount "/dev/mapper/loop${BLANK_LOOP}p3" "$OVERLAY_MOUNT"
+mount "/dev/mapper/loop${BLANK_LOOP}p4" "$ROLLBACK_MOUNT"
 
 echo "Configuring boot files..."
 
-# ---- A/B BOOT: Create autoboot.txt on shared boot partition ----
-# This file controls the native Pi bootloader A/B selection.
-# See: https://github.com/raspberrypi/documentation/blob/master/documentation/asciidoc/computers/config_txt/autoboot.adoc
-cat > "${SHARED_BOOT_MOUNT}/autoboot.txt" <<AUTOFW
+# ---- bootloader: autoboot.txt on boot partition ----
+cat > "${BOOT_MOUNT_MOUNT}/autoboot.txt" <<AUTOFW
 [all]
 tryboot_a_b=1
-boot_partition=2
-[tryboot]
-boot_partition=4
+boot_partition=1
 AUTOFW
 
-# ---- Slot A cmdline.txt - point root to partition 3 ----
-# USB: /dev/sda3 (no p), NVMe: /dev/nvme0n1p3 (with p)
-sed -i -r "s|PARTUUID=.*\\-[0-9]+|${DEVICE}3|" "${SLOT_A_BOOT_MOUNT}/cmdline.txt"
+# ---- Slot A cmdline.txt - point root to partition 2 (base rootfs, read-only) ----
+# overlayroot will mount p3 as overlay on top of p2
+sed -i -r "s|root=PARTUUID=.*|root=/dev/${DEVICE}2 rootfstype=ext4 ro|" "${BOOT_MOUNT_MOUNT}/cmdline.txt"
 
-# ---- Slot B cmdline.txt - point root to partition 5 ----
-sed -i -r "s|PARTUUID=.*\\-[0-9]+|${DEVICE}5|" "${SLOT_B_BOOT_MOUNT}/cmdline.txt"
-
-# ---- Slot A fstab ----
-cat > "${SLOT_A_ROOTFS_MOUNT}/etc/fstab" <<EOF
+# ---- fstab on base rootfs ----
+# Note: p3 and p4 are managed by overlayroot, not in fstab
+cat > "${ROOTFS_MOUNT}/etc/fstab" <<EOF
 proc            /proc   proc  defaults       0  0
 ${DEVICE}1    ${BOOT_MOUNT}  vfat  defaults       0  2
-${DEVICE}3     /       ext4  defaults,noatime 0  1
 EOF
 
-# ---- Slot B fstab ----
-cat > "${SLOT_B_ROOTFS_MOUNT}/etc/fstab" <<EOF
-proc            /proc   proc  defaults       0  0
-${DEVICE}1    ${BOOT_MOUNT}  vfat  defaults       0  2
-${DEVICE}5     /       ext4  defaults,noatime 0  1
+# ---- Configure overlayroot ----
+# This tells Pi OS to mount p3 as the overlay writable layer
+# overlayroot.conf is read by the initramfs during boot
+cat > "${ROOTFS_MOUNT}/etc/overlayroot.conf" <<EOF
+overlayroot="overlayfs:dev=/dev/${DEVICE}3"
 EOF
 
-# ---- Copy helper scripts to shared boot partition ----
-cp custom.toml               "${SHARED_BOOT_MOUNT}/custom.toml"
-cp boot_to_recovery          "${SHARED_BOOT_MOUNT}/"
-cp boot_to_root              "${SHARED_BOOT_MOUNT}/"
-cp restore_root              "${SHARED_BOOT_MOUNT}/"
-cp check_restore_gpio.py     "${SHARED_BOOT_MOUNT}/"
+# ---- Copy helper scripts to boot partition ----
+cp custom.toml               "${BOOT_MOUNT_MOUNT}/custom.toml"
+cp boot_to_recovery          "${BOOT_MOUNT_MOUNT}/"
+cp boot_to_root              "${BOOT_MOUNT_MOUNT}/"
+cp restore_root              "${BOOT_MOUNT_MOUNT}/"
+cp check_restore_gpio.py     "${BOOT_MOUNT_MOUNT}/"
 
-# ---- Add auto-restore systemd service on Slot A rootfs ----
-# This runs restore_root on first boot from a fresh USB image
-cat > "${SLOT_A_ROOTFS_MOUNT}/etc/systemd/system/restore-root.service" <<EOF
+# ---- Install restore_root systemd service on base rootfs ----
+cat > "${ROOTFS_MOUNT}/etc/systemd/system/restore-root.service" <<EOF
 [Unit]
-Description=Restore RootFS from USB
+Description=Restore OverlayFS from Backup Partition
 DefaultDependencies=no
 After=local-fs.target
 Before=basic.target
 
 [Service]
 Type=oneshot
-ExecStart=/boot/firmware/restore_root
+ExecStart=/bin/bash -c 'umount /var/log 2>/dev/null || true; umount /etc 2>/dev/null || true; dd if=/dev/${DEVICE}4 of=/dev/${DEVICE}3 bs=4M status=progress; sync; systemctl reboot'
 RemainAfterExit=yes
 
 [Install]
 WantedBy=basic.target
 EOF
+
 # Create symlink manually (systemctl doesn't exist in this container)
-mkdir -p "${SLOT_A_ROOTFS_MOUNT}/etc/systemd/system/basic.target.wants"
-ln -sf "../restore-root.service" "${SLOT_A_ROOTFS_MOUNT}/etc/systemd/system/basic.target.wants/restore-root.service"
+mkdir -p "${ROOTFS_MOUNT}/etc/systemd/system/basic.target.wants"
+ln -sf "../restore-root.service" "${ROOTFS_MOUNT}/etc/systemd/system/basic.target.wants/restore-root.service"
 
 # ---- Backup firstrun.sh for recovery (raspberrypi-sys-mods) ----
-# These match fixed paths in the firstboot file, use double quotes to expand \$BOOT_MOUNT
-sed -i "/^mount \\/boot\\$/a cp /${BOOT_MOUNT}/firstrun.sh /${BOOT_MOUNT}/firstrun.bak" \
-  "${SLOT_A_ROOTFS_MOUNT}/usr/lib/raspberrypi-sys-mods/firstboot"
-sed -i "/^mount \"\\$FWLOC\" -o rw\\$/a cp /${BOOT_MOUNT}/firstrun.sh /${BOOT_MOUNT}/firstrun.bak" \
-  "${SLOT_A_ROOTFS_MOUNT}/usr/lib/raspberrypi-sys-mods/firstboot"
+sed -i "/^mount \\/boot\$/a cp /${BOOT_MOUNT}/firstrun.sh /${BOOT_MOUNT}/firstrun.bak" \
+  "${ROOTFS_MOUNT}/usr/lib/raspberrypi-sys-mods/firstboot"
+sed -i "/^mount \"\$FWLOC\" -o rw\$/a cp /${BOOT_MOUNT}/firstrun.sh /${BOOT_MOUNT}/firstrun.bak" \
+  "${ROOTFS_MOUNT}/usr/lib/raspberrypi-sys-mods/firstboot"
 
 echo ""
 echo "=== Done! ==="
 echo "Image: ${WORKDIR}/${MAIN_OS_BASE}.restore.img"
 echo "Partition layout:"
-echo "  p1 (shared boot):  ${P1_SIZE} sectors"
-echo "  p2 (slot A boot):  ${P2_SIZE} sectors"
-echo "  p3 (slot A root):  ${P3_SIZE} sectors"
-echo "  p4 (slot B boot):  ${P4_SIZE} sectors"
-echo "  p5 (slot B root):  ${P5_SIZE} sectors"
+echo "  p1 (boot):       ${P1_SIZE} sectors   (FAT32)"
+echo "  p2 (base rootfs): ${P2_SIZE} sectors   (ext4, read-only)"
+echo "  p3 (overlay A):  ${P3_SIZE} sectors   (ext4, overlay root)"
+echo "  p4 (overlay B):  ${P4_SIZE} sectors   (ext4, backup overlay)"
+echo ""
+echo "Boot behavior:"
+echo "  - Boot mounts p2 (base rootfs) read-only"
+echo "  - overlayroot mounts p3 as writable overlay on top"
+echo "  - All changes (logs, configs, packages) go to p3"
+echo "  - Rebooting preserves p2, p3 survives"
+echo "  - Rollback: dd p4→p3, reboot (restores to p4 state)"
+echo "  - Factory reset: dd /dev/zero to p3, reboot (factory state)"
