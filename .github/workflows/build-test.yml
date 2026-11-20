@@ -1,0 +1,24 @@
+name: Build Test
+
+on:
+  push:
+    branches-ignore:
+      - main
+
+jobs:
+  build:
+    name: Test create_epicPiOS build
+    runs-on: self-hosted
+    timeout-minutes: 120
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run build test (desktop)
+        run: |
+          docker run -t \
+            -v /dev:/dev \
+            -v "${{ github.workspace }}:/epicPiOS" \
+            --privileged \
+            ubuntu:focal \
+            /bin/bash -c 'cd epicPiOS && ./epic-desktop-answers | ./create_epicPiOS'
