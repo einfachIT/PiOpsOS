@@ -1,11 +1,13 @@
-name: Runner Test
+name: Self-hosted Runner Test
 
 on:
-  workflow_dispatch:
+  push:
+    branches-ignore:
+      - main
 
 jobs:
-  check:
-    name: Self-hosted runner check
+  test:
+    name: Run on self-hosted runner
     runs-on: self-hosted
     steps:
       - name: Greetings
