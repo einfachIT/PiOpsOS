@@ -172,6 +172,12 @@ kpartx -v -a "/dev/loop${BLANK_LOOP}"
 kpartx -v -a "/dev/loop${RECOVERY_LOOP}"
 kpartx -v -a "/dev/loop${MAIN_LOOP}"
 
+# Force kernel to re-read partition tables (critical in Docker where blkid may return empty)
+partprobe "/dev/loop${BLANK_LOOP}" 2>/dev/null || true
+partprobe "/dev/loop${RECOVERY_LOOP}" 2>/dev/null || true
+partprobe "/dev/loop${MAIN_LOOP}" 2>/dev/null || true
+sleep 1
+
 # ==================== COPY DATA ====================
 echo "Copying data to partitions..."
 
@@ -221,11 +227,36 @@ rmdir "$BOOT_A_SRC"
 
 echo "Configuring boot files..."
 
-# ---- Get PARTUUIDs from the formatted partitions (works on any target device) ----
-BOOT_A_PARTUUID=$(blkid -s PARTUUID -o value /dev/mapper/loop${BLANK_LOOP}p1)
-BOOT_B_PARTUUID=$(blkid -s PARTUUID -o value /dev/mapper/loop${BLANK_LOOP}p2)
-ROOTFS_PARTUUID=$(blkid -s PARTUUID -o value /dev/mapper/loop${BLANK_LOOP}p3)
-OVERLAY_PARTUUID=$(blkid -s PARTUUID -o value /dev/mapper/loop${BLANK_LOOP}p4)
+# ---- Extract PARTUUIDs from loop devices ----
+# On Mac (Parallels), blkid works fine on loop devices. In Docker Linux,
+# blkid may return empty — so retry with partprobe if needed.
+get_partuuid() {
+  local dev="$1"
+  local val
+  val=$(blkid -s PARTUUID -o value "$dev" 2>/dev/null)
+  if [ -z "$val" ]; then
+    local loop=$(echo "$dev" | grep -o 'loop[0-9]*' | tr -dc '0-9')
+    partprobe "/dev/loop${loop}" 2>/dev/null || true
+    sleep 1
+    val=$(blkid -s PARTUUID -o value "$dev" 2>/dev/null)
+  fi
+  echo "$val"
+}
+
+BOOT_A_PARTUUID=$(get_partuuid "/dev/mapper/loop${BLANK_LOOP}p1")
+BOOT_B_PARTUUID=$(get_partuuid "/dev/mapper/loop${BLANK_LOOP}p2")
+ROOTFS_PARTUUID=$(get_partuuid "/dev/mapper/loop${BLANK_LOOP}p3")
+OVERLAY_PARTUUID=$(get_partuuid "/dev/mapper/loop${BLANK_LOOP}p4")
+
+# Validate — fail hard if any PARTUUID is empty
+for name in BOOT_A_PARTUUID BOOT_B_PARTUUID ROOTFS_PARTUUID OVERLAY_PARTUUID; do
+  eval "val=\$${name}"
+  if [ -z "$val" ]; then
+    echo "❌ FATAL: $name PARTUUID is empty! Aborting."
+    exit 1
+  fi
+done
+
 echo "Partition PARTUUIDs:"
 echo "  boot_a:  $BOOT_A_PARTUUID"
 echo "  boot_b:  $BOOT_B_PARTUUID"
@@ -241,8 +272,9 @@ AUTOFW
 
 # ---- cmdline.txt — point root to partition 3 (base rootfs, read-only) ----
 # Use PARTUUID instead of device path — works regardless of /dev/mmcblk0 vs /dev/sda
-sed -i -r "s|root=PARTUUID=.*|root=PARTUUID=${ROOTFS_PARTUUID} rootfstype=ext4 ro|g" "${BOOT_A_MOUNT}/cmdline.txt"
-sed -i -r "s|root=PARTUUID=.*|root=PARTUUID=${ROOTFS_PARTUUID} rootfstype=ext4 ro|g" "${BOOT_B_MOUNT}/cmdline.txt"
+# Add fsck.mode=skip because rootfs is read-only (immutable) — prevents systemd-fsck failure
+sed -i -r "s|root=PARTUUID=.*|root=PARTUUID=${ROOTFS_PARTUUID} rootfstype=ext4 ro fsck.mode=skip|g" "${BOOT_A_MOUNT}/cmdline.txt"
+sed -i -r "s|root=PARTUUID=.*|root=PARTUUID=${ROOTFS_PARTUUID} rootfstype=ext4 ro fsck.mode=skip|g" "${BOOT_B_MOUNT}/cmdline.txt"
 
 # ---- fstab on base rootfs — mount boot A by default, plus overlay ----
 cat > "${ROOTFS_MOUNT}/etc/fstab" <<EOF
