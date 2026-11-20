@@ -3,7 +3,7 @@ set -e
 set -x
 
 # ==================== CONFIGURATION ====================
-DEVICE="/dev/sda"                       # USB stick device (supports /dev/sda, /dev/nvme0n1, etc.)
+DEVICE="/dev/sda"                       # USB stick device (e.g. /dev/sda, /dev/nvme0n1, /dev/mmcblk0)
 BOOT_MOUNT="/boot/firmware"             # Use /boot if your distro doesn't use /boot/firmware
 WORKDIR="./tmp"
 
@@ -195,24 +195,25 @@ boot_partition=2
 boot_partition=4
 AUTOFW
 
-# ---- Slot A cmdline.txt - point root to p3 ----
-sed -i -r "s|PARTUUID=.*\\-[0-9]+|${DEVICE}p3|" "${SLOT_A_BOOT_MOUNT}/cmdline.txt"
+# ---- Slot A cmdline.txt - point root to partition 3 ----
+# USB: /dev/sda3 (no p), NVMe: /dev/nvme0n1p3 (with p)
+sed -i -r "s|PARTUUID=.*\\-[0-9]+|${DEVICE}3|" "${SLOT_A_BOOT_MOUNT}/cmdline.txt"
 
-# ---- Slot B cmdline.txt - point root to p5 ----
-sed -i -r "s|PARTUUID=.*\\-[0-9]+|${DEVICE}p5|" "${SLOT_B_BOOT_MOUNT}/cmdline.txt"
+# ---- Slot B cmdline.txt - point root to partition 5 ----
+sed -i -r "s|PARTUUID=.*\\-[0-9]+|${DEVICE}5|" "${SLOT_B_BOOT_MOUNT}/cmdline.txt"
 
 # ---- Slot A fstab ----
 cat > "${SLOT_A_ROOTFS_MOUNT}/etc/fstab" <<EOF
 proc            /proc   proc  defaults       0  0
-${DEVICE}p1     ${BOOT_MOUNT}  vfat  defaults       0  2
-${DEVICE}p3     /       ext4  defaults,noatime 0  1
+${DEVICE}1    ${BOOT_MOUNT}  vfat  defaults       0  2
+${DEVICE}3     /       ext4  defaults,noatime 0  1
 EOF
 
 # ---- Slot B fstab ----
 cat > "${SLOT_B_ROOTFS_MOUNT}/etc/fstab" <<EOF
 proc            /proc   proc  defaults       0  0
-${DEVICE}p1     ${BOOT_MOUNT}  vfat  defaults       0  2
-${DEVICE}p5     /       ext4  defaults,noatime 0  1
+${DEVICE}1    ${BOOT_MOUNT}  vfat  defaults       0  2
+${DEVICE}5     /       ext4  defaults,noatime 0  1
 EOF
 
 # ---- Copy helper scripts to shared boot partition ----
