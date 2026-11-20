@@ -27,14 +27,12 @@ if [ "$CURRENT_PART" = "1" ]; then
   # Toggle autoboot.txt to boot partition 2
   cat > "${BOOT_FIRMWARE}/autoboot.txt" <<AUTOFW
 [all]
-tryboot_a_b=1
 boot_partition=2
 AUTOFW
 else
   echo "Currently on boot B (partition 2) → switching to boot A (partition 1)"
   cat > "${BOOT_FIRMWARE}/autoboot.txt" <<AUTOFW
 [all]
-tryboot_a_b=1
 boot_partition=1
 AUTOFW
 fi

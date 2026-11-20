@@ -194,6 +194,7 @@ mkdir -p "$BOOT_A_SRC"
 mount "/dev/mapper/loop${RECOVERY_LOOP}p1" "$BOOT_A_SRC"
 cp -a "$BOOT_A_SRC/." "$BOOT_A_MOUNT/"
 cp -a "$BOOT_A_SRC/." "$BOOT_B_MOUNT/"
+
 umount "$BOOT_A_SRC"
 rmdir "$BOOT_A_SRC"
 
@@ -264,39 +265,23 @@ EOF
 # (user-data is placed by ansible at /boot/firmware/user-data — vendor-data goes next to it)
 cat > "${BOOT_A_MOUNT}/vendor-data" <<'EOF'
 #cloud-config
+package_update: true
+package_upgrade: false
+packages:
+  - overlayroot
 runcmd:
   - |-
-    # Only run overlayroot setup on first boot
-    if [ ! -f /boot/firmware/.overlayroot-setup-complete ]; then
-      # Install overlayroot if not already installed
-      if ! dpkg -s overlayroot >/dev/null 2>&1; then
-        echo "[PiOpsOS] Installing overlayroot package..."
-        apt-get update -qq 2>/dev/null || true
-        apt-get install -y -qq overlayroot 2>/dev/null || true
-      fi
+    # Update initramfs to include overlayroot module
+    echo "[PiOpsOS] Updating initramfs..."
+    update-initramfs -u 2>/dev/null || true
 
-      # Add auto_initramfs=1 to config.txt if not present
-      if ! grep -q "auto_initramfs=1" /boot/firmware/config.txt 2>/dev/null; then
-        echo "auto_initramfs=1" >> /boot/firmware/config.txt
-      fi
-
-      # Update initramfs to include overlayroot module
-      echo "[PiOpsOS] Updating initramfs..."
-      update-initramfs -u 2>/dev/null || true
-
-      # Copy updated initramfs to the other boot partition
-      # /boot/firmware/ is the current boot partition's FAT32
-      # /boot/b/ is the other boot partition's FAT32 mount point
-      if mountpoint -q /boot/b; then
-        cp /boot/firmware/initrd.img* /boot/b/ 2>/dev/null && echo "[PiOpsOS] Copied initramfs to /boot/b"
-      fi
-
-      # Mark setup as complete to skip on subsequent boots
-      touch /boot/firmware/.overlayroot-setup-complete
-
-      # Reboot so p2 boots with the updated initramfs (overlayroot active)
-      reboot
+    # Copy updated initramfs to the other boot partition
+    if mountpoint -q /boot/b; then
+      cp /boot/firmware/initrd.img* /boot/b/ 2>/dev/null && echo "[PiOpsOS] Copied initramfs to /boot/b"
     fi
+
+    # Reboot so p2 boots with the updated initramfs (overlayroot active)
+    reboot
 EOF
 echo "Vendor-data written to ${BOOT_A_MOUNT}/vendor-data"
 

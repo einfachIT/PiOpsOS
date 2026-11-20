@@ -30,7 +30,6 @@ BOOT_FIRMWARE="/boot/firmware"
 if [ -f "${BOOT_FIRMWARE}/autoboot.txt" ]; then
   cat > "${BOOT_FIRMWARE}/autoboot.txt" <<AUTOFW
 [all]
-tryboot_a_b=1
 boot_partition=1
 AUTOFW
   echo "Set boot_partition=1 in autoboot.txt"

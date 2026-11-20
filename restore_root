@@ -22,7 +22,6 @@ if [ -f "${BOOT_FIRMWARE}/restore" ]; then
   if [ -f "${BOOT_FIRMWARE}/autoboot.txt" ]; then
     cat > "${BOOT_FIRMWARE}/autoboot.txt" <<AUTOFW
 [all]
-tryboot_a_b=1
 boot_partition=1
 AUTOFW
   fi
