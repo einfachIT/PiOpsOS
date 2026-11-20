@@ -3,7 +3,7 @@ set -e
 set -x
 
 # ==================== CONFIGURATION ====================
-DEVICE="/dev/sda"                       # USB stick device
+DEVICE="/dev/sda"                       # USB stick device (supports /dev/sda, /dev/nvme0n1, etc.)
 BOOT_MOUNT="/boot/firmware"             # Use /boot if your distro doesn't use /boot/firmware
 WORKDIR="./tmp"
 
@@ -36,7 +36,7 @@ cleanup() {
     kpartx -d "/dev/loop${d}" 2>/dev/null || true
     losetup -d "/dev/loop${d}" 2>/dev/null || true
   done
-  for m in "${RECOVERY_BOOT_MOUNT}" "${RECOVERY_ROOT_MOUNT}" "${ROOTFS_MOUNT}"; do
+  for m in "$SHARED_BOOT_MOUNT" "$SLOT_A_BOOT_MOUNT" "$SLOT_A_ROOTFS_MOUNT" "$SLOT_B_BOOT_MOUNT" "$SLOT_B_ROOTFS_MOUNT"; do
     umount "$m" 2>/dev/null || true
   done
 }
@@ -47,9 +47,8 @@ export DEBIAN_FRONTEND=noninteractive
 apt update
 apt install -y uuid-runtime parted curl unzip kpartx xz-utils fdisk
 
-
 # ==================== PREPARATION ====================
-echo "=== USB Restore Image Builder ==="
+echo "=== A/B Boot Image Builder (USB/NVMe + Trixie compatible) ==="
 mkdir -p "$WORKDIR"
 
 # Accept URLs from args or prompt
@@ -80,20 +79,26 @@ fi
 # ==================== CALCULATE PARTITIONS ====================
 echo "Calculating partitions..."
 
-# Boot partition (partition 1) info
+# Boot partition (partition 1) info from the OS images
 RECOVERY_BOOT_START=$(get_fdisk_field "${WORKDIR}/${RECOVERY_OS_BASE}.img" 1 2)   # start sector
 RECOVERY_BOOT_LEN=$(get_fdisk_field "${WORKDIR}/${RECOVERY_OS_BASE}.img" 1 4)    # length
-MAIN_BOOT_LEN=$(get_fdisk_field "${WORKDIR}/${MAIN_OS_BASE}.img" 1 4)            # FIXED: was -f 2
+MAIN_BOOT_LEN=$(get_fdisk_field "${WORKDIR}/${MAIN_OS_BASE}.img" 1 4)            # boot partition size from main OS
 
-# Root partition (partition 2) info
-RECOVERY_ROOT_LEN=$(get_fdisk_field "${WORKDIR}/${RECOVERY_OS_BASE}.img" 2 4)
-MAIN_ROOT_LEN=$(get_fdisk_field "${WORKDIR}/${MAIN_OS_BASE}.img" 2 4)
+# Root partition (partition 2) info from the OS images
+MAIN_ROOT_LEN=$(get_fdisk_field "${WORKDIR}/${MAIN_OS_BASE}.img" 2 4)            # root partition size from main OS
 
-# Partition sizes and layout
-P1_SIZE=$RECOVERY_BOOT_LEN
-P2_SIZE=$((RECOVERY_ROOT_LEN + MAIN_ROOT_LEN))
-P3_SIZE=$MAIN_ROOT_LEN
-TOTAL_SECTORS=$((P1_SIZE + MAIN_BOOT_LEN + P2_SIZE + P3_SIZE))
+# A/B Dual Boot Partition Layout (5 partitions):
+# p1: Shared boot partition (FAT32)   — bootloader, config.txt, kernel, scripts, autoboot.txt
+# p2: Slot A boot partition (FAT32)   — cmdline.txt pointing to Root A (p3)
+# p3: Slot A root filesystem (ext4)   — primary working system
+# p4: Slot B boot partition (FAT32)   — cmdline.txt pointing to Root B (p5)
+# p5: Slot B root filesystem (ext4)   — fallback/backup system
+P1_SIZE=$RECOVERY_BOOT_LEN       # Shared boot = recovery boot size
+P2_SIZE=$MAIN_BOOT_LEN           # Slot A boot = main OS boot size
+P3_SIZE=$MAIN_ROOT_LEN           # Slot A root = main OS root size
+P4_SIZE=$MAIN_BOOT_LEN           # Slot B boot = main OS boot size
+P5_SIZE=$MAIN_ROOT_LEN           # Slot B root = main OS root size
+TOTAL_SECTORS=$((P1_SIZE + P2_SIZE + P3_SIZE + P4_SIZE + P5_SIZE))
 IMAGE_MB=$(( (TOTAL_SECTORS * 512 / 4194304) + 1 ))
 
 echo "Image size: ~${IMAGE_MB} MB"
@@ -102,21 +107,20 @@ echo "Image size: ~${IMAGE_MB} MB"
 echo "Creating restore image..."
 dd if=/dev/zero of="${WORKDIR}/${MAIN_OS_BASE}.restore.img" bs=4M count="$IMAGE_MB" status=progress
 
-UUID_RESTORE=$(uuidgen)
-UUID_ROOTFS=$(uuidgen)
+UUID_ROOTFS_A=$(uuidgen)
+UUID_ROOTFS_B=$(uuidgen)
 PARTUUID=$(tr -dc 'a-f0-9' < /dev/urandom 2>/dev/null | head -c8)
 
-# Partition layout:
-# p1: Recovery boot
-# p2: Recovery root  (+ main boot space reserved)
-# p3: Main root
+# Partition layout (A/B dual boot per Raspberry Pi native bootloader docs)
 sfdisk "${WORKDIR}/${MAIN_OS_BASE}.restore.img" <<EOF
 label: dos
 label-id: 0x${PARTUUID}
 unit: sectors
 1 : start=${RECOVERY_BOOT_START}, size=${P1_SIZE}, type=c
-2 : start=$((RECOVERY_BOOT_START + P1_SIZE)), size=${P2_SIZE}, type=83
+2 : start=$((RECOVERY_BOOT_START + P1_SIZE)), size=${P2_SIZE}, type=c
 3 : start=$((RECOVERY_BOOT_START + P1_SIZE + P2_SIZE)), size=${P3_SIZE}, type=83
+4 : start=$((RECOVERY_BOOT_START + P1_SIZE + P2_SIZE + P3_SIZE)), size=${P4_SIZE}, type=c
+5 : start=$((RECOVERY_BOOT_START + P1_SIZE + P2_SIZE + P3_SIZE + P4_SIZE)), size=${P5_SIZE}, type=83
 EOF
 
 # ==================== SETUP LOOP DEVICES ====================
@@ -135,61 +139,92 @@ kpartx -v -a "/dev/loop${MAIN_LOOP}"
 
 # ==================== COPY DATA ====================
 echo "Copying data to partitions..."
+
+# p1: Shared boot = recovery boot content
 dd if="/dev/mapper/loop${RECOVERY_LOOP}p1" of="/dev/mapper/loop${BLANK_LOOP}p1" bs=4M status=progress
-dd if="/dev/mapper/loop${RECOVERY_LOOP}p2" of="/dev/mapper/loop${BLANK_LOOP}p2" bs=4M status=progress
+
+# p2: Slot A boot = copy shared boot (will get slot-specific cmdline.txt below)
+dd if="/dev/mapper/loop${RECOVERY_LOOP}p1" of="/dev/mapper/loop${BLANK_LOOP}p2" bs=4M status=progress
+
+# p3: Slot A root = main OS root filesystem
 dd if="/dev/mapper/loop${MAIN_LOOP}p2" of="/dev/mapper/loop${BLANK_LOOP}p3" bs=4M status=progress
+
+# p4: Slot B boot = copy shared boot (will get slot-specific cmdline.txt below)
+dd if="/dev/mapper/loop${RECOVERY_LOOP}p1" of="/dev/mapper/loop${BLANK_LOOP}p4" bs=4M status=progress
+
+# p5: Slot B root = main OS root filesystem
+dd if="/dev/mapper/loop${MAIN_LOOP}p2" of="/dev/mapper/loop${BLANK_LOOP}p5" bs=4M status=progress
 
 # ==================== CONFIGURE FILESYSTEMS ====================
 echo "Configuring partitions..."
-tune2fs "/dev/mapper/loop${BLANK_LOOP}p2" -U "$UUID_RESTORE"
-e2label "/dev/mapper/loop${BLANK_LOOP}p2" recoveryfs
+
+# Label and set UUIDs for both root filesystems
+e2label "/dev/mapper/loop${BLANK_LOOP}p3" rootsa
 e2fsck -y -f "/dev/mapper/loop${BLANK_LOOP}p3"
-tune2fs "/dev/mapper/loop${BLANK_LOOP}p3" -U "$UUID_ROOTFS"
-e2fsck -pf "/dev/mapper/loop${BLANK_LOOP}p2"
-resize2fs "/dev/mapper/loop${BLANK_LOOP}p2"
+tune2fs "/dev/mapper/loop${BLANK_LOOP}p3" -U "$UUID_ROOTFS_A"
+
+e2label "/dev/mapper/loop${BLANK_LOOP}p5" rootsb
+e2fsck -y -f "/dev/mapper/loop${BLANK_LOOP}p5"
+tune2fs "/dev/mapper/loop${BLANK_LOOP}p5" -U "$UUID_ROOTFS_B"
 
 # ==================== MOUNT AND CONFIGURE ====================
 echo "Mounting partitions..."
-RECOVERY_BOOT_MOUNT="${WORKDIR}/mnt/restore_boot"
-RECOVERY_ROOT_MOUNT="${WORKDIR}/mnt/restore_recovery"
-ROOTFS_MOUNT="${WORKDIR}/mnt/restore_rootfs"
-mkdir -p "$RECOVERY_BOOT_MOUNT" "$RECOVERY_ROOT_MOUNT" "$ROOTFS_MOUNT"
+SHARED_BOOT_MOUNT="${WORKDIR}/mnt/shared_boot"
+SLOT_A_BOOT_MOUNT="${WORKDIR}/mnt/slot_a_boot"
+SLOT_A_ROOTFS_MOUNT="${WORKDIR}/mnt/slot_a_rootfs"
+SLOT_B_BOOT_MOUNT="${WORKDIR}/mnt/slot_b_boot"
+SLOT_B_ROOTFS_MOUNT="${WORKDIR}/mnt/slot_b_rootfs"
+mkdir -p "$SHARED_BOOT_MOUNT" "$SLOT_A_BOOT_MOUNT" "$SLOT_A_ROOTFS_MOUNT" "$SLOT_B_BOOT_MOUNT" "$SLOT_B_ROOTFS_MOUNT"
 
-mount "/dev/mapper/loop${BLANK_LOOP}p1" "$RECOVERY_BOOT_MOUNT"
-mount "/dev/mapper/loop${BLANK_LOOP}p2" "$RECOVERY_ROOT_MOUNT"
-mount "/dev/mapper/loop${BLANK_LOOP}p3" "$ROOTFS_MOUNT"
+mount "/dev/mapper/loop${BLANK_LOOP}p1" "$SHARED_BOOT_MOUNT"
+mount "/dev/mapper/loop${BLANK_LOOP}p2" "$SLOT_A_BOOT_MOUNT"
+mount "/dev/mapper/loop${BLANK_LOOP}p3" "$SLOT_A_ROOTFS_MOUNT"
+mount "/dev/mapper/loop${BLANK_LOOP}p4" "$SLOT_B_BOOT_MOUNT"
+mount "/dev/mapper/loop${BLANK_LOOP}p5" "$SLOT_B_ROOTFS_MOUNT"
 
 echo "Configuring boot files..."
 
-# cmdline.txt - point root to USB partition 3
-sed -i -r "s|PARTUUID=.*\-02|${DEVICE}p3|" "$RECOVERY_BOOT_MOUNT/cmdline.txt"
+# ---- A/B BOOT: Create autoboot.txt on shared boot partition ----
+# This file controls the native Pi bootloader A/B selection.
+# See: https://github.com/raspberrypi/documentation/blob/master/documentation/asciidoc/computers/config_txt/autoboot.adoc
+cat > "${SHARED_BOOT_MOUNT}/autoboot.txt" <<AUTOFW
+[all]
+tryboot_a_b=1
+boot_partition=2
+[tryboot]
+boot_partition=4
+AUTOFW
 
-# Generate boot UUID for fstab
-BOOT_UUID=$(blkid -o export "/dev/mapper/loop${BLANK_LOOP}p1" | grep '^UUID=' | cut -d'=' -f2)
+# ---- Slot A cmdline.txt - point root to p3 ----
+sed -i -r "s|PARTUUID=.*\\-[0-9]+|${DEVICE}p3|" "${SLOT_A_BOOT_MOUNT}/cmdline.txt"
 
-# Write rootfs fstab
-cat > "${ROOTFS_MOUNT}/etc/fstab" <<EOF
-proc             /proc   proc  defaults       0  0
-${DEVICE}p1      ${BOOT_MOUNT}  vfat  defaults       0  2
-${DEVICE}p3      /       ext4  defaults,noatime 0  1
+# ---- Slot B cmdline.txt - point root to p5 ----
+sed -i -r "s|PARTUUID=.*\\-[0-9]+|${DEVICE}p5|" "${SLOT_B_BOOT_MOUNT}/cmdline.txt"
+
+# ---- Slot A fstab ----
+cat > "${SLOT_A_ROOTFS_MOUNT}/etc/fstab" <<EOF
+proc            /proc   proc  defaults       0  0
+${DEVICE}p1     ${BOOT_MOUNT}  vfat  defaults       0  2
+${DEVICE}p3     /       ext4  defaults,noatime 0  1
 EOF
 
-# Write recovery fstab
-cat > "${RECOVERY_ROOT_MOUNT}/etc/fstab" <<EOF
-proc             /proc   proc  defaults       0  0
-${DEVICE}p1      ${BOOT_MOUNT}  vfat  defaults       0  2
-${DEVICE}p2      /       ext4  defaults,noatime 0  1
+# ---- Slot B fstab ----
+cat > "${SLOT_B_ROOTFS_MOUNT}/etc/fstab" <<EOF
+proc            /proc   proc  defaults       0  0
+${DEVICE}p1     ${BOOT_MOUNT}  vfat  defaults       0  2
+${DEVICE}p5     /       ext4  defaults,noatime 0  1
 EOF
 
-# Copy helper scripts to boot partition
-cp custom.toml               "${RECOVERY_BOOT_MOUNT}/custom.toml.bak"
-cp boot_to_recovery          "${RECOVERY_BOOT_MOUNT}/"
-cp boot_to_root              "${RECOVERY_BOOT_MOUNT}/"
-cp restore_root              "${RECOVERY_BOOT_MOUNT}/"
-cp check_restore_gpio.py     "${RECOVERY_BOOT_MOUNT}/"
+# ---- Copy helper scripts to shared boot partition ----
+cp custom.toml               "${SHARED_BOOT_MOUNT}/custom.toml"
+cp boot_to_recovery          "${SHARED_BOOT_MOUNT}/"
+cp boot_to_root              "${SHARED_BOOT_MOUNT}/"
+cp restore_root              "${SHARED_BOOT_MOUNT}/"
+cp check_restore_gpio.py     "${SHARED_BOOT_MOUNT}/"
 
-# Add auto-restore in recovery partition 
-cat > "${ROOTFS_MOUNT}/etc/systemd/system/restore-root.service" <<EOF
+# ---- Add auto-restore systemd service on Slot A rootfs ----
+# This runs restore_root on first boot from a fresh USB image
+cat > "${SLOT_A_ROOTFS_MOUNT}/etc/systemd/system/restore-root.service" <<EOF
 [Unit]
 Description=Restore RootFS from USB
 DefaultDependencies=no
@@ -205,22 +240,22 @@ RemainAfterExit=yes
 WantedBy=basic.target
 EOF
 # Create symlink manually (systemctl doesn't exist in this container)
-mkdir -p "${ROOTFS_MOUNT}/etc/systemd/system/basic.target.wants"
-ln -sf "../restore-root.service" "${ROOTFS_MOUNT}/etc/systemd/system/basic.target.wants/restore-root.service"
+mkdir -p "${SLOT_A_ROOTFS_MOUNT}/etc/systemd/system/basic.target.wants"
+ln -sf "../restore-root.service" "${SLOT_A_ROOTFS_MOUNT}/etc/systemd/system/basic.target.wants/restore-root.service"
 
-# Backup firstrun.sh for recovery (raspberrypi-sys-mods)
-# Note: these match fixed paths in the file, use double quotes to expand $BOOT_MOUNT
-sed -i "/^mount \/boot\$/a cp /${BOOT_MOUNT}/firstrun.sh /${BOOT_MOUNT}/firstrun.bak" \
-  "${ROOTFS_MOUNT}/usr/lib/raspberrypi-sys-mods/firstboot"
-sed -i "/^mount \"\$FWLOC\" -o rw\$/a cp /${BOOT_MOUNT}/firstrun.sh /${BOOT_MOUNT}/firstrun.bak" \
-  "${ROOTFS_MOUNT}/usr/lib/raspberrypi-sys-mods/firstboot"
-
-# Create recovery rootfs image from partition 3
-echo "Creating recovery rootfs image..."
-dd if="/dev/mapper/loop${BLANK_LOOP}p3" of="${RECOVERY_ROOT_MOUNT}/rootfs.img" bs=4M status=progress
+# ---- Backup firstrun.sh for recovery (raspberrypi-sys-mods) ----
+# These match fixed paths in the firstboot file, use double quotes to expand \$BOOT_MOUNT
+sed -i "/^mount \\/boot\\$/a cp /${BOOT_MOUNT}/firstrun.sh /${BOOT_MOUNT}/firstrun.bak" \
+  "${SLOT_A_ROOTFS_MOUNT}/usr/lib/raspberrypi-sys-mods/firstboot"
+sed -i "/^mount \"\\$FWLOC\" -o rw\\$/a cp /${BOOT_MOUNT}/firstrun.sh /${BOOT_MOUNT}/firstrun.bak" \
+  "${SLOT_A_ROOTFS_MOUNT}/usr/lib/raspberrypi-sys-mods/firstboot"
 
 echo ""
 echo "=== Done! ==="
 echo "Image: ${WORKDIR}/${MAIN_OS_BASE}.restore.img"
-echo "Recovery image: ${RECOVERY_ROOT_MOUNT}/rootfs.img"
-
+echo "Partition layout:"
+echo "  p1 (shared boot):  ${P1_SIZE} sectors"
+echo "  p2 (slot A boot):  ${P2_SIZE} sectors"
+echo "  p3 (slot A root):  ${P3_SIZE} sectors"
+echo "  p4 (slot B boot):  ${P4_SIZE} sectors"
+echo "  p5 (slot B root):  ${P5_SIZE} sectors"
