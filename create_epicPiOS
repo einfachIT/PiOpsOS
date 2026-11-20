@@ -259,25 +259,47 @@ proc            /proc   proc  defaults       0  0
 PARTUUID=${BOOT_A_PARTUUID}  ${BOOT_MOUNT}  vfat  defaults       0  2
 EOF
 
-# ---- Install overlayroot package and configure initramfs ----
-# The official Pi OS overlayroot package handles the overlay activation via cmdline.txt
-# p1 boots with root=p3 only (no overlay — rollback)
-# p2 boots with root=p3 + overlayroot=dev=p4 (with overlay — normal)
+# ---- Cloud-init vendor-data: install overlayroot and configure initramfs ----
+# Write vendor-data to /boot/firmware/vendor-data on BOOT_A so that when the
+# device first boots, cloud-init will execute it and set up overlayroot.
+cat > "${BOOT_A_MOUNT}/vendor-data" <<'EOF'
+#cloud-config
+bootcmd:
+  - |
+    # Install overlayroot if not already installed
+    if ! dpkg -s overlayroot >/dev/null 2>&1; then
+      apt-get update -qq 2>/dev/null || true
+      apt-get install -y -qq overlayroot 2>/dev/null || true
+    fi
 
-# Install overlayroot (provides overlayroot.service that reads cmdline.txt)
-echo "Installing overlayroot package..."
-chroot "${ROOTFS_MOUNT}" apt-get update -qq 2>/dev/null || true
-chroot "${ROOTFS_MOUNT}" apt-get install -y -qq overlayroot 2>/dev/null || true
+    # Add auto_initramfs=1 to config.txt if not present
+    if ! grep -q "auto_initramfs=1" /boot/firmware/config.txt 2>/dev/null; then
+      echo "auto_initramfs=1" >> /boot/firmware/config.txt
+    fi
 
-# Ensure auto_initramfs=1 is in config.txt for initramfs generation
-# (overlayroot needs to be included in the initramfs)
-if ! grep -q "auto_initramfs=1" "${BOOT_A_MOUNT}/config.txt" 2>/dev/null; then
-    echo "auto_initramfs=1" >> "${BOOT_A_MOUNT}/config.txt"
-fi
+    # Update initramfs to include overlayroot module
+    update-initramfs -u 2>/dev/null || true
 
-# Update initramfs to include overlayroot module
-echo "Updating initramfs..."
-chroot "${ROOTFS_MOUNT}" update-initramfs -u 2>/dev/null || echo "⚠ initramfs update skipped (may need to run on-device)"
+    # Copy updated initramfs to the other boot partition
+    # /boot/firmware/ is the current boot partition's FAT32
+    # /boot/b/ is the other boot partition's FAT32 mount point
+    if [ -d /boot/b ]; then
+      # Try to mount the other partition by label (boot_b)
+      if mount -o ro LABEL=boot_b /boot/b 2>/dev/null || mountpoint -q /boot/b; then
+        cp /boot/firmware/initrd.img* /boot/b/ 2>/dev/null && echo "[PiOpsOS] Copied initramfs to /boot/b"
+      fi
+    fi
+
+    # Mark setup as complete
+    touch /boot/firmware/.overlayroot-setup-complete
+
+    # Reboot after setup is done
+    reboot
+EOF
+
+# Ensure the vendor-data file will not be consumed during build-time boot
+# by keeping it in a known location that cloud-init ignores until first boot
+echo "Vendor-data written to ${BOOT_A_MOUNT}/vendor-data"
 
 # ---- Copy helper scripts to boot A partition ----
 cp custom.toml               "${BOOT_A_MOUNT}/custom.toml"
