@@ -306,56 +306,6 @@ cp boot_to_root              "${BOOT_A_MOUNT}/"
 cp restore_root              "${BOOT_A_MOUNT}/"
 cp check_restore_gpio.py     "${BOOT_A_MOUNT}/"
 
-# ---- Kernel update hook — auto-copy boot files to other partition ----
-cat > "${ROOTFS_MOUNT}/etc/apt/apt.conf.d/99-piops-kernel-update" <<'HOOK'
-# PiOpsOS: After kernel update, copy new boot files to the other boot partition
-# and toggle boot_partition in autoboot.txt for A/B boot switching.
-DPkg::Post-Invoke {
-  "/usr/local/bin/piops-kernel-update-hook";
-};
-HOOK
-
-# ---- Kernel update hook script ----
-cat > "${ROOTFS_MOUNT}/usr/local/bin/piops-kernel-update-hook" <<'HOOKSCRIPT'
-#!/bin/bash
-# PiOpsOS Kernel Update Hook
-# Copies new boot files to the other boot partition and toggles boot_partition
-
-set -e
-
-BOOT_A="/boot/firmware"  # currently mounted as /boot/firmware
-BOOT_B="/boot/b"
-
-# Detect current boot_partition from autoboot.txt
-CURRENT_PART=$(grep -oP 'boot_partition=\K[0-9]+' "${BOOT_A}/autoboot.txt" 2>/dev/null || echo "1")
-
-if [ "$CURRENT_PART" = "1" ]; then
-  OTHER_BOOT="$BOOT_B"
-  NEW_PART=2
-else
-  OTHER_BOOT="$BOOT_A"
-  NEW_PART=1
-fi
-
-# Copy boot files to the other partition (kernel, dtbs, firmware)
-rsync -av --delete \
-  --exclude="cmdline.txt" \
-  --exclude="autoboot.txt" \
-  --exclude="custom.toml" \
-  "${BOOT_A}/" "${OTHER_BOOT}/"
-
-# Toggle boot_partition in autoboot.txt on the OTHER partition
-if [ -f "${OTHER_BOOT}/autoboot.txt" ]; then
-  sed -i "s/boot_partition=[0-9]/boot_partition=${NEW_PART}/" "${OTHER_BOOT}/autoboot.txt"
-fi
-
-echo "[PiOpsOS] Kernel update: copied boot files to boot partition ${NEW_PART}, toggled autoboot.txt"
-HOOKSCRIPT
-
-chmod +x "${ROOTFS_MOUNT}/usr/local/bin/piops-kernel-update-hook"
-
-# ---- Create boot_b mount point on rootfs (for kernel update hook) ----
-mkdir -p "${ROOTFS_MOUNT}/boot/b"
 
 # ---- Backup firstrun.sh for recovery (raspberrypi-sys-mods) ----
 if [ -f "${ROOTFS_MOUNT}/usr/lib/raspberrypi-sys-mods/firstboot" ]; then
