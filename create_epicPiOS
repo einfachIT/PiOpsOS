@@ -261,9 +261,9 @@ boot_partition=1
 AUTOFW
 
 # ---- cmdline.txt — point root to partition 3 (base rootfs, read-only) ----
-# Replace ONLY the PARTUUID value, preserving rootwait, quiet, init=, etc.
-sed -i -r "s|root=PARTUUID=[0-9a-f]+|root=PARTUUID=${ROOTFS_PARTUUID}|g" "${BOOT_A_MOUNT}/cmdline.txt"
-sed -i -r "s|root=PARTUUID=[0-9a-f]+|root=PARTUUID=${ROOTFS_PARTUUID}|g" "${BOOT_B_MOUNT}/cmdline.txt"
+# Replace the entire root=PARTUUID=XXX-NN value (including partition suffix), preserving rootwait, quiet, init=, etc.
+sed -i -r 's|root=PARTUUID=[^ ]+|root=PARTUUID=${ROOTFS_PARTUUID}|g' "${BOOT_A_MOUNT}/cmdline.txt"
+sed -i -r 's|root=PARTUUID=[^ ]+|root=PARTUUID=${ROOTFS_PARTUUID}|g' "${BOOT_B_MOUNT}/cmdline.txt"
 # Then replace fsck.repair=yes with fsck.mode=skip (don't fsck read-only root)
 sed -i -r 's|fsck\.repair=yes|fsck.mode=skip|g' "${BOOT_A_MOUNT}/cmdline.txt"
 sed -i -r 's|fsck\.repair=yes|fsck.mode=skip|g' "${BOOT_B_MOUNT}/cmdline.txt"
