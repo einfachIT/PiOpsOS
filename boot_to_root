@@ -1,13 +1,46 @@
 #!/bin/bash
-if [ "$EUID" -ne 0 ]
-  then echo "Please run as root"
-  exit
+set -e
+
+if [ "$EUID" -ne 0 ]; then
+  echo "Please run as root"
+  exit 1
 fi
 
-echo Rebooting to root partition in 5 seconds
-sleep 5
+echo "[PiOpsOS] Factory reset: wiping overlay and booting to pristine state..."
 
-sed -i 's/mmcblk0p2/mmcblk0p3/' /boot/firmware/cmdline.txt
+# Find the overlay partition (p4) — it's ext4, mounted on /
+OVERLAY_DEV=$(df / | tail -1 | awk '{print $1}')
+
+# Detect DEVICE from /dev/disk/by-partlabel or cmdline
+# Get the base device (strip partition number): /dev/sda1 → /dev/sda, /dev/nvme0n1p4 → /dev/nvme0n1
+BASE_DEV=$(echo "$OVERLAY_DEV" | sed -E 's/p?[0-9]+$//')
+
+echo "Overlay device: $OVERLAY_DEV"
+echo "Base device: $BASE_DEV"
+
+# Wipe overlay partition (wipe filesystem label and superblock)
+echo "Wiping overlay partition..."
+wipefs -a "$OVERLAY_DEV" 2>/dev/null || true
+mkfs.ext4 -L "overlay" "$OVERLAY_DEV" -F
+
+echo "Overlay wiped."
+
+# Reset autoboot.txt to boot from partition 1 (boot A, base kernel)
+BOOT_FIRMWARE="/boot/firmware"
+if [ -f "${BOOT_FIRMWARE}/autoboot.txt" ]; then
+  cat > "${BOOT_FIRMWARE}/autoboot.txt" <<AUTOFW
+[all]
+boot_partition=1
+AUTOFW
+  echo "Set boot_partition=1 in autoboot.txt"
+else
+  echo "Warning: autoboot.txt not found on ${BOOT_FIRMWARE}"
+  # Legacy fallback: update cmdline.txt directly
+  sed -i -r "s|root=/dev/${BASE_DEV}[0-9]+|root=/dev/${BASE_DEV}3 rootfstype=ext4 ro|g" "${BOOT_FIRMWARE}/cmdline.txt"
+fi
+
+echo "Rebooting in 5 seconds..."
+sleep 5
 
 reboot
 exit 0

@@ -30,3 +30,4 @@ To only switch between booting to recovery partition and normal root partition u
 
 resulting image is then stored in ./tmp
 
+# Runner check commit
