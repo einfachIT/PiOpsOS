@@ -266,17 +266,67 @@ AUTOFW
 sed -i -r "s|root=PARTUUID=.*|root=PARTUUID=${ROOTFS_PARTUUID} rootfstype=ext4 fsck.mode=skip|g" "${BOOT_A_MOUNT}/cmdline.txt"
 sed -i -r "s|root=PARTUUID=.*|root=PARTUUID=${ROOTFS_PARTUUID} rootfstype=ext4 fsck.mode=skip|g" "${BOOT_B_MOUNT}/cmdline.txt"
 
-# ---- fstab on base rootfs — mount boot A by default, plus overlay ----
+# ---- fstab on base rootfs — mount boot A by default, NO overlay ----
+# overlay is managed by overlayroot.service, not fstab
 cat > "${ROOTFS_MOUNT}/etc/fstab" <<EOF
 proc            /proc   proc  defaults       0  0
 PARTUUID=${BOOT_A_PARTUUID}  ${BOOT_MOUNT}  vfat  defaults       0  2
-PARTUUID=${OVERLAY_PARTUUID}  /       overlay overlayfs   0       0
 EOF
 
-# ---- overlayroot.conf — tells Pi OS to use p3 as the writable overlay ----
+# ---- overlayroot.conf — tells Pi OS to use p4 as the writable overlay ----
+# This is the default for boot_b. For boot_a, piops-boot-switch.service disables it.
 cat > "${ROOTFS_MOUNT}/etc/overlayroot.conf" <<EOF
 overlayroot="overlayfs:partuuid=${OVERLAY_PARTUUID}"
 EOF
+
+# ---- Store overlay PARTUUID for runtime lookup ----
+cat > "${ROOTFS_MOUNT}/etc/piops.conf" <<EOF
+OVERLAY_PARTUUID=${OVERLAY_PARTUUID}
+EOF
+
+# ---- Create boot-switch systemd service ----
+# This runs early in boot to decide whether to enable overlay (boot_b) or not (boot_a)
+cat > "${ROOTFS_MOUNT}/etc/systemd/system/piops-boot-switch.service" <<'EOF'
+[Unit]
+Description=PiOpsOS: Switch boot mode based on autoboot.txt
+Before=overlayroot.service
+DefaultDependencies=no
+Requires=local-fs-pre.target
+After=local-fs-pre.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/piops-boot-switch.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# ---- Create boot-switch script ----
+cat > "${ROOTFS_MOUNT}/usr/local/bin/piops-boot-switch.sh" <<'BOOTSWITCH'
+#!/bin/bash
+set -euo pipefail
+
+# Read boot partition selection from autoboot.txt
+BOOT_PARTITION=$(grep -o 'boot_partition=[0-9]*' /boot/autoboot.txt 2>/dev/null | cut -d= -f2 || echo "1")
+
+if [ "$BOOT_PARTITION" = "1" ]; then
+    # boot_a: disable overlay, use p3 directly as root
+    echo 'overlayroot="disabled"' > /etc/overlayroot.conf
+else
+    # boot_b: enable overlay with p4 as upper layer on p3
+    OVERLAY_PARTUUID=$(cat /etc/piops.conf 2>/dev/null | grep OVERLAY_PARTUUID | cut -d= -f2)
+    if [ -n "$OVERLAY_PARTUUID" ]; then
+        echo "overlayroot=\"overlayfs:partuuid=${OVERLAY_PARTUUID}\"" > /etc/overlayroot.conf
+    fi
+fi
+BOOTSWITCH
+
+chmod +x "${ROOTFS_MOUNT}/usr/local/bin/piops-boot-switch.sh"
+
+# Enable the boot-switch service
+ln -sf /etc/systemd/system/piops-boot-switch.service "${ROOTFS_MOUNT}/etc/systemd/system/multi-user.target.wants/piops-boot-switch.service"
 
 # ---- Copy helper scripts to boot A partition ----
 cp custom.toml               "${BOOT_A_MOUNT}/custom.toml"
