@@ -183,24 +183,27 @@ echo "Copying data to partitions..."
 
 # Boot A/B partitions will be populated after formatting with FAT32
 
-# p2: Base rootfs = main OS root filesystem (read-only, immutable base)
-dd if="/dev/mapper/loop${MAIN_LOOP}p2" of="/dev/mapper/loop${BLANK_LOOP}p2" bs=4M status=progress
+# p3: Base rootfs = main OS root filesystem (readable, customizable)
+dd if="/dev/mapper/loop${MAIN_LOOP}p2" of="/dev/mapper/loop${BLANK_LOOP}p3" bs=4M status=progress
 
-# p3: Overlay — start empty (will fill during first boot)
-dd if=/dev/zero of="/dev/mapper/loop${BLANK_LOOP}p3" bs=4M count=0 status=none
+# p4: Overlay — start empty (will fill during first boot)
+dd if=/dev/zero of="/dev/mapper/loop${BLANK_LOOP}p4" bs=4M count=0 status=none
 
 # ==================== FORMAT PARTITIONS ====================
 echo "Formatting partitions..."
 
 # Create FAT32 filesystem for boot partitions
 mkfs.vfat -F 32 -n "boot_a" "/dev/mapper/loop${BLANK_LOOP}p1"
-mkfs.vfat -F 32 -n "boot_b" "/dev/mapper/loop${BLANK_LOOP}p4"
+mkfs.vfat -F 32 -n "boot_b" "/dev/mapper/loop${BLANK_LOOP}p2"
+
+# Create ext4 filesystem for rootfs partition
+mkfs.ext4 -L "rootfs" "/dev/mapper/loop${BLANK_LOOP}p3"
+
+# Create ext4 filesystem for overlay partition
+mkfs.ext4 -L "overlay" "/dev/mapper/loop${BLANK_LOOP}p4"
 
 # ---- Create mount point for boot B on rootfs ----
 mkdir -p "${ROOTFS_MOUNT}/boot/b"
-
-# Create ext4 filesystem for overlay partition
-mkfs.ext4 -L "overlay" "/dev/mapper/loop${BLANK_LOOP}p3"
 
 # ==================== MOUNT AND CONFIGURE ====================
 echo "Mounting partitions..."
@@ -273,8 +276,8 @@ AUTOFW
 # ---- cmdline.txt — point root to partition 2 (base rootfs, read-only) ----
 # Use PARTUUID instead of device path — works regardless of /dev/mmcblk0 vs /dev/sda
 # Add fsck.mode=skip because rootfs is read-only (immutable) — prevents systemd-fsck failure
-sed -i -r "s|root=PARTUUID=.*|root=PARTUUID=${ROOTFS_PARTUUID} rootfstype=ext4 ro fsck.mode=skip|g" "${BOOT_A_MOUNT}/cmdline.txt"
-sed -i -r "s|root=PARTUUID=.*|root=PARTUUID=${ROOTFS_PARTUUID} rootfstype=ext4 ro fsck.mode=skip|g" "${BOOT_B_MOUNT}/cmdline.txt"
+sed -i -r "s|root=PARTUUID=.*|root=PARTUUID=${ROOTFS_PARTUUID} rootfstype=ext4 fsck.mode=skip|g" "${BOOT_A_MOUNT}/cmdline.txt"
+sed -i -r "s|root=PARTUUID=.*|root=PARTUUID=${ROOTFS_PARTUUID} rootfstype=ext4 fsck.mode=skip|g" "${BOOT_B_MOUNT}/cmdline.txt"
 
 # ---- fstab on base rootfs — mount boot A by default, plus overlay ----
 cat > "${ROOTFS_MOUNT}/etc/fstab" <<EOF
