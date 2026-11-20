@@ -127,14 +127,14 @@ BOOT_SIZE=$( [ "$RECOVERY_BOOT_LEN" -gt "$MAIN_BOOT_LEN" ] && echo "$RECOVERY_BO
 MAIN_ROOT_LEN=$(get_fdisk_field "${WORKDIR}/${MAIN_OS_BASE}.img" 2 4)            # root partition size
 
 # New 4-partition layout (MBR compatible):
-# p1: Boot A   (FAT32) — base kernel/dtbs/firmware matching p3
-# p2: Boot B   (FAT32) — updated kernel/dtbs/firmware after kernel updates
-# p3: Base rootfs (ext4, ro) — Pi OS Trixie + customizations baked in
-# p4: Overlay  (ext4, rw) — runtime changes, logs, configs
+# p1: Boot A   (FAT32) — base kernel/dtbs/firmware
+# p2: Base rootfs (ext4, ro) — Pi OS Trixie + customizations (kernel boots from here)
+# p3: Overlay  (ext4, rw) — runtime changes, logs, configs (mounted on p2 via overlayfs)
+# p4: Boot B   (FAT32) — updated kernel/dtbs/firmware after kernel updates
 P1_SIZE=$BOOT_SIZE        # Boot A
-P2_SIZE=$BOOT_SIZE        # Boot B (same size as Boot A)
-P3_SIZE=$MAIN_ROOT_LEN    # Base rootfs
-P4_SIZE=2097152           # Overlay = 1 GB (2 * 1024 * 1024 sectors)
+P2_SIZE=$MAIN_ROOT_LEN    # Base rootfs (kernel boots from this)
+P3_SIZE=2097152           # Overlay = 1 GB (2 * 1024 * 1024 sectors)
+P4_SIZE=$BOOT_SIZE        # Boot B (same size as Boot A)
 TOTAL_SECTORS=$((RECOVERY_BOOT_START + P1_SIZE + P2_SIZE + P3_SIZE + P4_SIZE))
 IMAGE_MB=$(( (TOTAL_SECTORS * 512 / 4194304) + 1 ))
 
@@ -183,24 +183,24 @@ echo "Copying data to partitions..."
 
 # Boot A/B partitions will be populated after formatting with FAT32
 
-# p3: Base rootfs = main OS root filesystem (read-only, immutable base)
-dd if="/dev/mapper/loop${MAIN_LOOP}p2" of="/dev/mapper/loop${BLANK_LOOP}p3" bs=4M status=progress
+# p2: Base rootfs = main OS root filesystem (read-only, immutable base)
+dd if="/dev/mapper/loop${MAIN_LOOP}p2" of="/dev/mapper/loop${BLANK_LOOP}p2" bs=4M status=progress
 
-# p4: Overlay — start empty (will fill during first boot)
-dd if=/dev/zero of="/dev/mapper/loop${BLANK_LOOP}p4" bs=4M count=0 status=none
+# p3: Overlay — start empty (will fill during first boot)
+dd if=/dev/zero of="/dev/mapper/loop${BLANK_LOOP}p3" bs=4M count=0 status=none
 
 # ==================== FORMAT PARTITIONS ====================
 echo "Formatting partitions..."
 
 # Create FAT32 filesystem for boot partitions
 mkfs.vfat -F 32 -n "boot_a" "/dev/mapper/loop${BLANK_LOOP}p1"
-mkfs.vfat -F 32 -n "boot_b" "/dev/mapper/loop${BLANK_LOOP}p2"
+mkfs.vfat -F 32 -n "boot_b" "/dev/mapper/loop${BLANK_LOOP}p4"
 
 # ---- Create mount point for boot B on rootfs ----
 mkdir -p "${ROOTFS_MOUNT}/boot/b"
 
 # Create ext4 filesystem for overlay partition
-mkfs.ext4 -L "overlay" "/dev/mapper/loop${BLANK_LOOP}p4"
+mkfs.ext4 -L "overlay" "/dev/mapper/loop${BLANK_LOOP}p3"
 
 # ==================== MOUNT AND CONFIGURE ====================
 echo "Mounting partitions..."
@@ -244,9 +244,9 @@ get_partuuid() {
 }
 
 BOOT_A_PARTUUID=$(get_partuuid "/dev/mapper/loop${BLANK_LOOP}p1")
-BOOT_B_PARTUUID=$(get_partuuid "/dev/mapper/loop${BLANK_LOOP}p2")
-ROOTFS_PARTUUID=$(get_partuuid "/dev/mapper/loop${BLANK_LOOP}p3")
-OVERLAY_PARTUUID=$(get_partuuid "/dev/mapper/loop${BLANK_LOOP}p4")
+ROOTFS_PARTUUID=$(get_partuuid "/dev/mapper/loop${BLANK_LOOP}p2")
+OVERLAY_PARTUUID=$(get_partuuid "/dev/mapper/loop${BLANK_LOOP}p3")
+BOOT_B_PARTUUID=$(get_partuuid "/dev/mapper/loop${BLANK_LOOP}p4")
 
 # Validate — fail hard if any PARTUUID is empty
 for name in BOOT_A_PARTUUID BOOT_B_PARTUUID ROOTFS_PARTUUID OVERLAY_PARTUUID; do
@@ -270,7 +270,7 @@ tryboot_a_b=1
 boot_partition=1
 AUTOFW
 
-# ---- cmdline.txt — point root to partition 3 (base rootfs, read-only) ----
+# ---- cmdline.txt — point root to partition 2 (base rootfs, read-only) ----
 # Use PARTUUID instead of device path — works regardless of /dev/mmcblk0 vs /dev/sda
 # Add fsck.mode=skip because rootfs is read-only (immutable) — prevents systemd-fsck failure
 sed -i -r "s|root=PARTUUID=.*|root=PARTUUID=${ROOTFS_PARTUUID} rootfstype=ext4 ro fsck.mode=skip|g" "${BOOT_A_MOUNT}/cmdline.txt"
@@ -283,7 +283,7 @@ PARTUUID=${BOOT_A_PARTUUID}  ${BOOT_MOUNT}  vfat  defaults       0  2
 PARTUUID=${OVERLAY_PARTUUID}  /       overlay overlayfs   0       0
 EOF
 
-# ---- overlayroot.conf — tells Pi OS to use p4 as the writable overlay ----
+# ---- overlayroot.conf — tells Pi OS to use p3 as the writable overlay ----
 cat > "${ROOTFS_MOUNT}/etc/overlayroot.conf" <<EOF
 overlayroot="overlayfs:partuuid=${OVERLAY_PARTUUID}"
 EOF
@@ -366,17 +366,17 @@ echo "=== Done! ==="
 echo "Image: ${WORKDIR}/${MAIN_OS_BASE}.restore.img"
 echo "Device used: ${DEVICE}"
 echo "Partition layout:"
-echo "  p1 (boot_a):    ${P1_SIZE} sectors   (FAT32)"
-echo "  p2 (boot_b):    ${P2_SIZE} sectors   (FAT32)"
-echo "  p3 (base rootfs): ${P3_SIZE} sectors   (ext4, read-only)"
-echo "  p4 (overlay):   ${P4_SIZE} sectors   (ext4, overlay root)"
+echo "  p1 (boot_a):      ${P1_SIZE} sectors   (FAT32)"
+echo "  p2 (base rootfs): ${P2_SIZE} sectors   (ext4, read-only)"
+echo "  p3 (overlay):     ${P3_SIZE} sectors   (ext4, mounted on p2 via overlayfs)"
+echo "  p4 (boot_b):      ${P4_SIZE} sectors   (FAT32)"
 echo ""
 echo "Boot behavior:"
-echo "  - Boot mounts p3 (base rootfs) read-only"
-echo "  - overlayroot mounts p4 as writable overlay on top"
-echo "  - All changes (logs, configs, packages) go to p4"
-echo "  - Rebooting preserves p3, p4 survives"
-echo "  - Factory reset: wipe p4, reboot (restores to customized p3)"
+echo "  - Boot mounts p2 (base rootfs) read-only"
+echo "  - overlayroot mounts p3 as writable overlay on top"
+echo "  - All changes (logs, configs, packages) go to p3"
+echo "  - Rebooting preserves p2, p3 survives"
+echo "  - Factory reset: wipe p3, reboot (restores to customized p2)"
 echo "  - Kernel update: new files copied to other boot partition, autoboot.txt toggled"
 echo ""
 echo "To flash:"
