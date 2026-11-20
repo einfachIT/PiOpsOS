@@ -6,10 +6,14 @@ set -x
 BOOT_MOUNT="/boot/firmware"
 WORKDIR="./tmp"
 
-# Device to flash to (defaults to USB, override with DEVICE env var)
-DEVICE="${DEVICE:-/dev/sdX}"
-
-echo "Target device: ${DEVICE} (USB default, override with DEVICE env var)"
+# Device to flash to (required)
+if [ -z "${DEVICE:-}" ]; then
+  echo "ERROR: DEVICE not set."
+  echo "  export DEVICE=/dev/sda     (USB stick)"
+  echo "  export DEVICE=/dev/mmcblk0 (SD card)"
+  echo "  export DEVICE=/dev/nvme0n1 (NVMe)"
+  exit 1
+fi
 
 # ==================== FUNCTIONS ====================
 
