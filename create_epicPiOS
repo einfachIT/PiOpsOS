@@ -271,6 +271,7 @@ sed -i -r 's|fsck\.repair=yes|fsck.mode=skip|g' "${BOOT_B_MOUNT}/cmdline.txt"
 # ---- fstab on base rootfs — mount boot A by default, NO overlay ----
 # overlay is managed by overlayroot.service, not fstab
 cat > "${ROOTFS_MOUNT}/etc/fstab" <<EOF
+PARTUUID=${ROOTFS_PARTUUID}  /           ext4  defaults,noatime  0  1
 proc            /proc   proc  defaults       0  0
 PARTUUID=${BOOT_A_PARTUUID}  ${BOOT_MOUNT}  vfat  defaults       0  2
 EOF
