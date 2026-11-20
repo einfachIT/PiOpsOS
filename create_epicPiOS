@@ -261,7 +261,6 @@ PARTUUID=${BOOT_A_PARTUUID}  ${BOOT_MOUNT}  vfat  defaults       0  2
 EOF
 
 # ---- Cloud-init vendor-data: install overlayroot and copy initramfs to boot_b ----
-# mounts: runs before runcmd, so boot_b is mounted at /tmp/boot_b when we copy
 cat > "${BOOT_A_MOUNT}/vendor-data" <<'EOF'
 #cloud-config
 mounts:
@@ -272,13 +271,10 @@ packages:
 
 runcmd:
   - |-
-    # After overlayroot installation, kernel/initramfs files can be in /boot or /boot/firmware
-    # Copy all matching files to boot_b so both partitions stay in sync
-    echo "[PiOpsOS] Copying kernel/initramfs to boot_b..."
-    cp -v /boot/firmware/initrd.img-* /tmp/boot_b/ 2>/dev/null || true
-    cp -v /boot/firmware/vmlinuz-* /tmp/boot_b/ 2>/dev/null || true
-    cp -v /boot/initrd.img-* /tmp/boot_b/ 2>/dev/null || true
-    cp -v /boot/vmlinuz-* /tmp/boot_b/ 2>/dev/null || true
+    # overlayroot postinst generates Pi initramfs files in /boot/firmware/
+    # Copy them to boot_b so both boot partitions have matching initramfs
+    echo "[PiOpsOS] Copying initramfs to boot_b..."
+    cp -v /boot/firmware/initramfs* /tmp/boot_b/ 2>/dev/null || true
 EOF
 echo "Vendor-data written to ${BOOT_A_MOUNT}/vendor-data"
 
