@@ -121,7 +121,7 @@ P2_SIZE=$MAIN_BOOT_LEN           # Slot A boot = main OS boot size
 P3_SIZE=$MAIN_ROOT_LEN           # Slot A root = main OS root size
 P4_SIZE=$MAIN_BOOT_LEN           # Slot B boot = main OS boot size
 P5_SIZE=$MAIN_ROOT_LEN           # Slot B root = main OS root size
-TOTAL_SECTORS=$((P1_SIZE + P2_SIZE + P3_SIZE + P4_SIZE + P5_SIZE))
+TOTAL_SECTORS=$((RECOVERY_BOOT_START + P1_SIZE + P2_SIZE + P3_SIZE + P4_SIZE + P5_SIZE))
 IMAGE_MB=$(( (TOTAL_SECTORS * 512 / 4194304) + 1 ))
 
 echo "Image size: ~${IMAGE_MB} MB"
