@@ -264,7 +264,7 @@ EOF
 cat > "${BOOT_A_MOUNT}/vendor-data" <<'EOF'
 #cloud-config
 mounts:
-  - ["LABEL=boot_b", "/tmp/boot_b", "vfat", "defaults,ro", "0", "0"]
+  - ["LABEL=boot_b", "/tmp/boot_b", "vfat", "defaults,rw", "0", "0"]
 
 packages:
   - overlayroot
