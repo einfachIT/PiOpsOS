@@ -271,14 +271,31 @@ packages:
 
 runcmd:
   - |-
-    # overlayroot postinst generates Pi initramfs files in /boot/firmware/
-    # Copy them to boot_b so both boot partitions have matching initramfs
-    echo "[PiOpsOS] Copying initramfs to boot_b..."
-    ls -la /boot/firmware/initramfs* 2>&1
+    set -x
+    LOG=/var/log/pios-os-debug.log
+    exec >${LOG} 2>&1
+    echo "===== PiOpsOS vendor-data debug at $(date) ====="
+    echo "UID: $(id)"
+    echo "CWD: $(pwd)"
+    echo "mounts from /proc/mounts:"
+    grep /tmp/boot_b /proc/mounts || echo "boot_b NOT MOUNTED"
+    echo ""
+    echo "ls -la /boot/firmware/:"
+    ls -la /boot/firmware/ || echo "/boot/firmware does not exist"
+    echo ""
+    echo "find /boot/firmware -name 'initramfs*':"
+    find /boot/firmware -name 'initramfs*' -type f 2>&1 || echo "find failed"
+    echo ""
+    echo "mkdir -p /tmp/boot_b"
     mkdir -p /tmp/boot_b
-    find /boot/firmware -name 'initramfs*' -exec cp -v {} /tmp/boot_b/ \;
-    echo "[PiOpsOS] Done. Contents of /tmp/boot_b:"
-    ls -la /tmp/boot_b/
+    echo ""
+    echo "cp results:"
+    find /boot/firmware -name 'initramfs*' -type f -exec cp -v {} /tmp/boot_b/ \; 2>&1
+    echo ""
+    echo "Contents of /tmp/boot_b after copy:"
+    ls -la /tmp/boot_b/ || echo "/tmp/boot_b does not exist"
+    echo ""
+    echo "===== Done ====="
 EOF
 echo "Vendor-data written to ${BOOT_A_MOUNT}/vendor-data"
 
