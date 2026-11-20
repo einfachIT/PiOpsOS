@@ -238,14 +238,14 @@ echo "  overlay: $OVERLAY_PARTUUID"
 # ---- autoboot.txt — controls which boot partition gets mounted ----
 cat > "${BOOT_A_MOUNT}/autoboot.txt" <<AUTOFW
 [all]
-tryboot_a_b=1
 boot_partition=1
 AUTOFW
 
-# ---- cmdline.txt — point root to partition 3 (base rootfs, read-only) ----
-# Replace the entire root=PARTUUID=XXX-NN value (including partition suffix), preserving rootwait, quiet, init=, etc.
+# ---- cmdline.txt — point root to correct partition based on boot partition ----
+# p1 (boot_a) → root=p3 (base rootfs, no overlay)
 sed -i -r "s|root=PARTUUID=[^ ]+|root=PARTUUID=${ROOTFS_PARTUUID}|g" "${BOOT_A_MOUNT}/cmdline.txt"
-sed -i -r "s|root=PARTUUID=[^ ]+|root=PARTUUID=${ROOTFS_PARTUUID}|g" "${BOOT_B_MOUNT}/cmdline.txt"
+# p2 (boot_b) → root=p4 (overlay rootfs, with overlay)
+sed -i -r "s|root=PARTUUID=[^ ]+|root=PARTUUID=${OVERLAY_PARTUUID}|g" "${BOOT_B_MOUNT}/cmdline.txt"
 # Then replace fsck.repair=yes with fsck.mode=skip (don't fsck read-only root)
 sed -i -r 's|fsck\.repair=yes|fsck.mode=skip|g' "${BOOT_A_MOUNT}/cmdline.txt"
 sed -i -r 's|fsck\.repair=yes|fsck.mode=skip|g' "${BOOT_B_MOUNT}/cmdline.txt"
