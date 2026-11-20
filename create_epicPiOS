@@ -32,13 +32,36 @@ get_fdisk_field() {
 
 # Cleanup loop devices and mounts on exit (success or failure)
 cleanup() {
-  for d in "$BLANK_LOOP" "$RECOVERY_LOOP" "$MAIN_LOOP"; do
-    kpartx -d "/dev/loop${d}" 2>/dev/null || true
-    losetup -d "/dev/loop${d}" 2>/dev/null || true
+  echo "Cleaning up..."
+
+  # 1. Unmount all mount points first (before kpartx/losetup)
+  for m in "$SHARED_BOOT_MOUNT" "$SLOT_A_BOOT_MOUNT" "$SLOT_A_ROOTFS_MOUNT" \
+           "$SLOT_B_BOOT_MOUNT" "$SLOT_B_ROOTFS_MOUNT"; do
+    if mountpoint -q "$m" 2>/dev/null; then
+      umount "$m" 2>/dev/null || true
+    fi
   done
-  for m in "$SHARED_BOOT_MOUNT" "$SLOT_A_BOOT_MOUNT" "$SLOT_A_ROOTFS_MOUNT" "$SLOT_B_BOOT_MOUNT" "$SLOT_B_ROOTFS_MOUNT"; do
-    umount "$m" 2>/dev/null || true
+
+  sleep 2  # Give kernel time to release devices
+
+  # 2. Remove kpartx mappings (loopXXp1, loopXXp2, ...)
+  losetup -a | grep -E '\.(restore|lite|img)$' | cut -d: -f1 | while read -r dev; do
+    kpartx -d "$dev" 2>/dev/null || true
   done
+
+  # 3. Detach all our loop devices
+  losetup -a | grep -E '\.(restore|lite|img)$' | cut -d: -f1 | while read -r dev; do
+    losetup -d "$dev" 2>/dev/null || true
+  done
+
+  # 4. Force cleanup any remaining orphans
+  losetup -a | grep -E 'loop[0-9]+' | grep -E '\.(restore|img)$' | cut -d: -f1 | while read -r dev; do
+    umount -l "$dev"* 2>/dev/null || true
+    kpartx -d "$dev" 2>/dev/null || true
+    losetup -d "$dev" 2>/dev/null || true
+  done
+
+  echo "Cleanup complete."
 }
 trap cleanup EXIT
 
