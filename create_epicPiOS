@@ -272,12 +272,13 @@ packages:
 
 runcmd:
   - |-
-    # After overlayroot installation, initramfs files are in /boot (mounted as boot_a)
-    # Copy them to boot_b so both partitions have matching initramfs
-    echo "[PiOpsOS] Copying initramfs from boot_a to boot_b..."
-    for f in /boot/firmware/initrd.img-* /boot/firmware/vmlinuz-*; do
-      [ -f "$f" ] && cp -v "$f" /tmp/boot_b/ || true
-    done
+    # After overlayroot installation, kernel/initramfs files can be in /boot or /boot/firmware
+    # Copy all matching files to boot_b so both partitions stay in sync
+    echo "[PiOpsOS] Copying kernel/initramfs to boot_b..."
+    cp -v /boot/firmware/initrd.img-* /tmp/boot_b/ 2>/dev/null || true
+    cp -v /boot/firmware/vmlinuz-* /tmp/boot_b/ 2>/dev/null || true
+    cp -v /boot/initrd.img-* /tmp/boot_b/ 2>/dev/null || true
+    cp -v /boot/vmlinuz-* /tmp/boot_b/ 2>/dev/null || true
 EOF
 echo "Vendor-data written to ${BOOT_A_MOUNT}/vendor-data"
 
