@@ -260,9 +260,9 @@ PARTUUID=${BOOT_A_PARTUUID}  ${BOOT_MOUNT}  vfat  defaults       0  2
 EOF
 
 # ---- Cloud-init vendor-data: install overlayroot and configure initramfs ----
-# Write vendor-data to cloud-init seed dir on rootfs so it's picked up on first boot
-mkdir -p "${ROOTFS_MOUNT}/var/lib/cloud/seed/nocloud"
-cat > "${ROOTFS_MOUNT}/var/lib/cloud/seed/nocloud/vendor-data" <<'EOF'
+# Write vendor-data alongside user-data on the boot partition so cloud-init picks it up
+# (user-data is placed by ansible at /boot/firmware/user-data — vendor-data goes next to it)
+cat > "${BOOT_A_MOUNT}/vendor-data" <<'EOF'
 #cloud-config
 runcmd:
   - |-
@@ -298,7 +298,7 @@ runcmd:
       reboot
     fi
 EOF
-echo "Vendor-data written to rootfs cloud-init seed dir"
+echo "Vendor-data written to ${BOOT_A_MOUNT}/vendor-data"
 
 # ---- Copy helper scripts to boot A partition ----
 cp custom.toml               "${BOOT_A_MOUNT}/custom.toml"
