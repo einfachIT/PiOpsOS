@@ -175,11 +175,7 @@ kpartx -v -a "/dev/loop${MAIN_LOOP}"
 # ==================== COPY DATA ====================
 echo "Copying data to partitions..."
 
-# p1: Boot A = recovery boot content (base kernel/dtbs/firmware)
-dd if="/dev/mapper/loop${RECOVERY_LOOP}p1" of="/dev/mapper/loop${BLANK_LOOP}p1" bs=4M status=progress
-
-# p2: Boot B = copy from p1 (initially identical, diverges after kernel updates)
-dd if="/dev/mapper/loop${BLANK_LOOP}p1" of="/dev/mapper/loop${BLANK_LOOP}p2" bs=4M status=progress
+# Boot A/B partitions will be populated after formatting with FAT32
 
 # p3: Base rootfs = main OS root filesystem (read-only, immutable base)
 dd if="/dev/mapper/loop${MAIN_LOOP}p2" of="/dev/mapper/loop${BLANK_LOOP}p3" bs=4M status=progress
@@ -213,6 +209,15 @@ mount "/dev/mapper/loop${BLANK_LOOP}p1" "$BOOT_A_MOUNT"
 mount "/dev/mapper/loop${BLANK_LOOP}p2" "$BOOT_B_MOUNT"
 mount "/dev/mapper/loop${BLANK_LOOP}p3" "$ROOTFS_MOUNT"
 mount "/dev/mapper/loop${BLANK_LOOP}p4" "$OVERLAY_MOUNT"
+
+# ---- Copy boot files from recovery image into formatted partitions ----
+BOOT_A_SRC="${WORKDIR}/mnt/recovery_boot"
+mkdir -p "$BOOT_A_SRC"
+mount "/dev/mapper/loop${RECOVERY_LOOP}p1" "$BOOT_A_SRC"
+cp -a "$BOOT_A_SRC/." "$BOOT_A_MOUNT/"
+cp -a "$BOOT_A_SRC/." "$BOOT_B_MOUNT/"
+umount "$BOOT_A_SRC"
+rmdir "$BOOT_A_SRC"
 
 echo "Configuring boot files..."
 
