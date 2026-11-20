@@ -260,28 +260,6 @@ proc            /proc   proc  defaults       0  0
 PARTUUID=${BOOT_A_PARTUUID}  ${BOOT_MOUNT}  vfat  defaults       0  2
 EOF
 
-# ---- Cloud-init vendor-data: install overlayroot and configure initramfs ----
-# Write vendor-data alongside user-data on the boot partition so cloud-init picks it up
-# (user-data is placed by ansible at /boot/firmware/user-data — vendor-data goes next to it)
-cat > "${BOOT_A_MOUNT}/vendor-data" <<'EOF'
-#cloud-config
-package_update: true
-package_upgrade: false
-packages:
-  - overlayroot
-mounts:
-  - ["LABEL=boot_b", "/tmp/boot_b", "vfat", "defaults,ro", "0", "0"]
-runcmd:
-  - |-
-    # Update initramfs to include overlayroot module, placing it directly on boot_b
-    echo "[PiOpsOS] Updating initramfs..."
-    update-initramfs -u -b /tmp/boot_b 2>/dev/null || true
-
-    # Reboot so p2 boots with the updated initramfs (overlayroot active)
-    reboot
-EOF
-echo "Vendor-data written to ${BOOT_A_MOUNT}/vendor-data"
-
 # ---- Copy helper scripts to boot A partition ----
 cp custom.toml               "${BOOT_A_MOUNT}/custom.toml"
 cp boot_to_recovery          "${BOOT_A_MOUNT}/"
