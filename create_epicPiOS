@@ -292,8 +292,10 @@ cat > "${ROOTFS_MOUNT}/usr/local/bin/piops-boot-switch.sh" <<'BOOTSWITCH'
 #!/bin/bash
 set -euo pipefail
 
+BOOT_AUTOTXT="/boot/firmware/autoboot.txt"
+
 # Read boot partition selection from autoboot.txt
-BOOT_PARTITION=$(grep -o 'boot_partition=[0-9]*' /boot/autoboot.txt 2>/dev/null | cut -d= -f2 || echo "1")
+BOOT_PARTITION=$(grep -o 'boot_partition=[0-9]*' "$BOOT_AUTOTXT" 2>/dev/null | cut -d= -f2 || echo "1")
 
 if [ "$BOOT_PARTITION" = "1" ]; then
     # boot_a: disable overlay, use p3 directly as root
