@@ -133,11 +133,12 @@ MAIN_ROOT_LEN=$(get_fdisk_field "${WORKDIR}/${MAIN_OS_BASE}.img" 2 4)           
 # p4: Overlay  (ext4, rw) — runtime changes, logs, configs
 P1_SIZE=$BOOT_SIZE        # Boot A
 P2_SIZE=$BOOT_SIZE        # Boot B (same size as Boot A)
-P3_SIZE=$MAIN_ROOT_LEN    # Rootfs (same size as source image rootfs)
-# Get total disk size from source image to calculate overlay = remainder
+P3_SIZE=$((MAIN_ROOT_LEN + 524288))   # Rootfs + 256MB buffer (524288 sectors = 256MB)
+# Source image total sectors (fdisk reported size)
 SOURCE_TOTAL_SECTORS=$(fdisk -lu "${WORKDIR}/${MAIN_OS_BASE}.img" | tail -1 | tr -d '*' | tr -s ' ' | cut -d' ' -f2)
-P4_SIZE=$((SOURCE_TOTAL_SECTORS - RECOVERY_BOOT_START - P1_SIZE - P2_SIZE - P3_SIZE))
-TOTAL_SECTORS=$((RECOVERY_BOOT_START + P1_SIZE + P2_SIZE + P3_SIZE + P4_SIZE))
+# New image: source size + 512M (boot_b) + 256M (rootfs buffer)
+TOTAL_SECTORS=$((SOURCE_TOTAL_SECTORS + BOOT_SIZE + 524288))
+P4_SIZE=$((TOTAL_SECTORS - RECOVERY_BOOT_START - P1_SIZE - P2_SIZE - P3_SIZE))
 IMAGE_MB=$(( (TOTAL_SECTORS * 512 / 4194304) + 1 ))
 
 echo "Image size: ~${IMAGE_MB} MB"
