@@ -230,19 +230,19 @@ AUTOFW
 
 # ---- cmdline.txt — point root to partition 3 (base rootfs, read-only) ----
 # Also add overlayroot=dev=/dev/sdX4 so overlayroot.conf isn't needed
-sed -i -r "s|root=PARTUUID=.*|root=/dev/${DEVICE}3 rootfstype=ext4 ro|g" "${BOOT_A_MOUNT}/cmdline.txt"
-sed -i -r "s|root=PARTUUID=.*|root=/dev/${DEVICE}3 rootfstype=ext4 ro|g" "${BOOT_B_MOUNT}/cmdline.txt"
+sed -i -r "s|root=PARTUUID=.*|root=${DEVICE}3 rootfstype=ext4 ro|g" "${BOOT_A_MOUNT}/cmdline.txt"
+sed -i -r "s|root=PARTUUID=.*|root=${DEVICE}3 rootfstype=ext4 ro|g" "${BOOT_B_MOUNT}/cmdline.txt"
 
 # ---- fstab on base rootfs — mount boot A by default, plus overlay ----
 cat > "${ROOTFS_MOUNT}/etc/fstab" <<EOF
 proc            /proc   proc  defaults       0  0
-/dev/${DEVICE}1  ${BOOT_MOUNT}  vfat  defaults       0  2
-/dev/${DEVICE}4  /       overlay overlayfs   0       0
+${DEVICE}1  ${BOOT_MOUNT}  vfat  defaults       0  2
+${DEVICE}4  /       overlay overlayfs   0       0
 EOF
 
 # ---- overlayroot.conf — tells Pi OS to use p4 as the writable overlay ----
 cat > "${ROOTFS_MOUNT}/etc/overlayroot.conf" <<EOF
-overlayroot="overlayfs:dev=/dev/${DEVICE}4"
+overlayroot="overlayfs:dev=${DEVICE}4"
 EOF
 
 # ---- Copy helper scripts to boot A partition ----
