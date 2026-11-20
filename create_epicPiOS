@@ -35,7 +35,7 @@ cleanup() {
   echo "Cleaning up..."
 
   # 1. Unmount all mount points first (before kpartx/losetup)
-  for m in "$BOOT_MOUNT_MOUNT" "$ROOTFS_MOUNT" "$OVERLAY_MOUNT" "$ROLLBACK_MOUNT"; do
+  for m in "$BOOT_MOUNT_MOUNT" "$ROOTFS_MOUNT" "$OVERLAY_MOUNT"; do
     if mountpoint -q "$m" 2>/dev/null; then
       umount "$m" 2>/dev/null || true
     fi
@@ -70,7 +70,7 @@ apt update
 apt install -y uuid-runtime parted curl unzip kpartx xz-utils fdisk e2fsprogs
 
 # ==================== PREPARATION ====================
-echo "=== OverlayFS A/B Boot Image Builder (USB/NVMe + Trixie compatible) ==="
+echo "=== OverlayFS Root Image Builder (USB/NVMe + Trixie compatible) ==="
 mkdir -p "$WORKDIR"
 
 # Accept URLs from args or prompt
@@ -109,16 +109,14 @@ MAIN_BOOT_LEN=$(get_fdisk_field "${WORKDIR}/${MAIN_OS_BASE}.img" 1 4)           
 # Root partition (partition 2) info from the OS images
 MAIN_ROOT_LEN=$(get_fdisk_field "${WORKDIR}/${MAIN_OS_BASE}.img" 2 4)            # root partition size from main OS
 
-# OverlayFS Partition Layout (4 partitions — MBR compatible):
+# OverlayFS Partition Layout (3 partitions — MBR compatible):
 # p1: Boot partition (FAT32)         — bootloader, kernel, scripts, custom.toml
-# p2: Base rootfs (ext4, read-only)  — full Pi OS Trixie, immutable base system
-# p3: Overlay A (ext4, read-write)   — runtime changes, logs, configs (survives reboot)
-# p4: Overlay B (ext4, read-write)   — previous state, swap with p3 on rollback
+# p2: Base rootfs (ext4, read-only)  — full Pi OS Trixie with customizations baked in
+# p3: Overlay (ext4, read-write)     — runtime changes, logs, configs (survives reboot)
 P1_SIZE=$RECOVERY_BOOT_LEN        # Boot partition = recovery boot size
 P2_SIZE=$MAIN_ROOT_LEN            # Base rootfs = main OS root size
-P3_SIZE=2097152                   # Overlay A = 1 GB (2 * 1024 * 1024 sectors)
-P4_SIZE=2097152                   # Overlay B = 1 GB (2 * 1024 * 1024 sectors)
-TOTAL_SECTORS=$((RECOVERY_BOOT_START + P1_SIZE + P2_SIZE + P3_SIZE + P4_SIZE))
+P3_SIZE=2097152                   # Overlay = 1 GB (2 * 1024 * 1024 sectors)
+TOTAL_SECTORS=$((RECOVERY_BOOT_START + P1_SIZE + P2_SIZE + P3_SIZE))
 IMAGE_MB=$(( (TOTAL_SECTORS * 512 / 4194304) + 1 ))
 
 echo "Image size: ~${IMAGE_MB} MB"
@@ -130,7 +128,7 @@ dd if=/dev/zero of="${WORKDIR}/${MAIN_OS_BASE}.restore.img" bs=4M count="$IMAGE_
 UUID_BASE_ROOT=$(uuidgen)
 PARTUUID=$(tr -dc 'a-f0-9' < /dev/urandom 2>/dev/null | head -c8)
 
-# Partition layout (4 partitions, MBR compatible)
+# Partition layout (3 partitions, MBR compatible)
 sfdisk "${WORKDIR}/${MAIN_OS_BASE}.restore.img" <<EOF
 label: dos
 label-id: 0x${PARTUUID}
@@ -138,7 +136,6 @@ unit: sectors
 1 : start=${RECOVERY_BOOT_START}, size=${P1_SIZE}, type=c
 2 : start=$((RECOVERY_BOOT_START + P1_SIZE)), size=${P2_SIZE}, type=83
 3 : start=$((RECOVERY_BOOT_START + P1_SIZE + P2_SIZE)), size=${P3_SIZE}, type=83
-4 : start=$((RECOVERY_BOOT_START + P1_SIZE + P2_SIZE + P3_SIZE)), size=${P4_SIZE}, type=83
 EOF
 
 # ==================== SETUP LOOP DEVICES ====================
@@ -164,33 +161,26 @@ dd if="/dev/mapper/loop${RECOVERY_LOOP}p1" of="/dev/mapper/loop${BLANK_LOOP}p1" 
 # p2: Base rootfs = main OS root filesystem (read-only, immutable base)
 dd if="/dev/mapper/loop${MAIN_LOOP}p2" of="/dev/mapper/loop${BLANK_LOOP}p2" bs=4M status=progress
 
-# p3: Overlay A — start empty (will fill during first boot)
+# p3: Overlay — start empty (will fill during first boot)
 dd if=/dev/zero of="/dev/mapper/loop${BLANK_LOOP}p3" bs=4M count=0 status=none
 
-# p4: Overlay B — start empty (backup state = factory state)
-dd if=/dev/zero of="/dev/mapper/loop${BLANK_LOOP}p4" bs=4M count=0 status=none
+# ==================== FORMAT OVERLAY PARTITION ====================
+echo "Formatting overlay partition..."
 
-# ==================== FORMAT OVERLAY PARTITIONS ====================
-echo "Formatting overlay partitions..."
-
-# Create ext4 filesystems for overlay partitions
-# These start empty — overlayroot manages them
-mkfs.ext4 -L "overlaya" "/dev/mapper/loop${BLANK_LOOP}p3"
-mkfs.ext4 -L "overlayb" "/dev/mapper/loop${BLANK_LOOP}p4"
+# Create ext4 filesystem for overlay partition
+mkfs.ext4 -L "overlay" "/dev/mapper/loop${BLANK_LOOP}p3"
 
 # ==================== MOUNT AND CONFIGURE ====================
 echo "Mounting partitions..."
 BOOT_MOUNT_MOUNT="${WORKDIR}/mnt/boot"
 ROOTFS_MOUNT="${WORKDIR}/mnt/rootfs"
 OVERLAY_MOUNT="${WORKDIR}/mnt/overlay"
-ROLLBACK_MOUNT="${WORKDIR}/mnt/rollback"
 
-mkdir -p "$BOOT_MOUNT_MOUNT" "$ROOTFS_MOUNT" "$OVERLAY_MOUNT" "$ROLLBACK_MOUNT"
+mkdir -p "$BOOT_MOUNT_MOUNT" "$ROOTFS_MOUNT" "$OVERLAY_MOUNT"
 
 mount "/dev/mapper/loop${BLANK_LOOP}p1" "$BOOT_MOUNT_MOUNT"
 mount "/dev/mapper/loop${BLANK_LOOP}p2" "$ROOTFS_MOUNT"
 mount "/dev/mapper/loop${BLANK_LOOP}p3" "$OVERLAY_MOUNT"
-mount "/dev/mapper/loop${BLANK_LOOP}p4" "$ROLLBACK_MOUNT"
 
 echo "Configuring boot files..."
 
@@ -201,12 +191,10 @@ tryboot_a_b=1
 boot_partition=1
 AUTOFW
 
-# ---- Slot A cmdline.txt - point root to partition 2 (base rootfs, read-only) ----
-# overlayroot will mount p3 as overlay on top of p2
+# ---- cmdline.txt - point root to partition 2 (base rootfs, read-only) ----
 sed -i -r "s|root=PARTUUID=.*|root=/dev/${DEVICE}2 rootfstype=ext4 ro|" "${BOOT_MOUNT_MOUNT}/cmdline.txt"
 
 # ---- fstab on base rootfs ----
-# Note: p3 and p4 are managed by overlayroot, not in fstab
 cat > "${ROOTFS_MOUNT}/etc/fstab" <<EOF
 proc            /proc   proc  defaults       0  0
 ${DEVICE}1    ${BOOT_MOUNT}  vfat  defaults       0  2
@@ -226,27 +214,6 @@ cp boot_to_root              "${BOOT_MOUNT_MOUNT}/"
 cp restore_root              "${BOOT_MOUNT_MOUNT}/"
 cp check_restore_gpio.py     "${BOOT_MOUNT_MOUNT}/"
 
-# ---- Install restore_root systemd service on base rootfs ----
-cat > "${ROOTFS_MOUNT}/etc/systemd/system/restore-root.service" <<EOF
-[Unit]
-Description=Restore OverlayFS from Backup Partition
-DefaultDependencies=no
-After=local-fs.target
-Before=basic.target
-
-[Service]
-Type=oneshot
-ExecStart=/bin/bash -c 'umount /var/log 2>/dev/null || true; umount /etc 2>/dev/null || true; dd if=/dev/${DEVICE}4 of=/dev/${DEVICE}3 bs=4M status=progress; sync; systemctl reboot'
-RemainAfterExit=yes
-
-[Install]
-WantedBy=basic.target
-EOF
-
-# Create symlink manually (systemctl doesn't exist in this container)
-mkdir -p "${ROOTFS_MOUNT}/etc/systemd/system/basic.target.wants"
-ln -sf "../restore-root.service" "${ROOTFS_MOUNT}/etc/systemd/system/basic.target.wants/restore-root.service"
-
 # ---- Backup firstrun.sh for recovery (raspberrypi-sys-mods) ----
 sed -i "/^mount \\/boot\$/a cp /${BOOT_MOUNT}/firstrun.sh /${BOOT_MOUNT}/firstrun.bak" \
   "${ROOTFS_MOUNT}/usr/lib/raspberrypi-sys-mods/firstboot"
@@ -259,13 +226,11 @@ echo "Image: ${WORKDIR}/${MAIN_OS_BASE}.restore.img"
 echo "Partition layout:"
 echo "  p1 (boot):       ${P1_SIZE} sectors   (FAT32)"
 echo "  p2 (base rootfs): ${P2_SIZE} sectors   (ext4, read-only)"
-echo "  p3 (overlay A):  ${P3_SIZE} sectors   (ext4, overlay root)"
-echo "  p4 (overlay B):  ${P4_SIZE} sectors   (ext4, backup overlay)"
+echo "  p3 (overlay):    ${P3_SIZE} sectors   (ext4, overlay root)"
 echo ""
 echo "Boot behavior:"
 echo "  - Boot mounts p2 (base rootfs) read-only"
 echo "  - overlayroot mounts p3 as writable overlay on top"
 echo "  - All changes (logs, configs, packages) go to p3"
 echo "  - Rebooting preserves p2, p3 survives"
-echo "  - Rollback: dd p4→p3, reboot (restores to p4 state)"
-echo "  - Factory reset: dd /dev/zero to p3, reboot (factory state)"
+echo "  - Factory reset: wipe p3, reboot (restores to customized p2)"

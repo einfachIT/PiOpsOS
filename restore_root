@@ -3,10 +3,11 @@ DEVICE="/dev/sda"
 BOOT_MOUNT="/boot/firmware"
 
 if [ -f "${BOOT_MOUNT}/restore" ]; then
-    echo Restoring Slot B rootfs from USB...
-    dd if=/rootfs.img of=${DEVICE}p5 conv=fsync status=progress bs=4M
-    rm -f ${BOOT_MOUNT}/restore
-    cp ${BOOT_MOUNT}/firstrun.bak ${BOOT_MOUNT}/firstrun.sh 2>/dev/null || true
-    /boot/firmware/boot_to_recovery restore
+    echo Restoring rootfs
+    dd if=/rootfs.img of=/dev/mmcblk0p3 conv=fsync status=progress bs=4M
+    unlink /boot/firmware/restore
+    cp /boot/firmware/firstrun.bak /boot/firmware/firstrun.sh
+    sed -i '1{s|$| init=/usr/lib/raspberrypi-sys-mods/firstboot systemd.run=/boot/firmware/firstrun.sh systemd.run_success_action=reboot systemd.unit=kernel-command-line.target|}' /boot/firmware/cmdline.txt
+    /boot/firmware/boot_to_root
 fi
 exit 0

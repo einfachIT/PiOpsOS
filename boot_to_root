@@ -4,11 +4,10 @@ if [ "$EUID" -ne 0 ]
   exit
 fi
 
-echo Rebooting to main partition in 5 seconds
+echo Factory resetting overlay partition and rebooting in 5 seconds
 sleep 5
 
-# Clear any autofail to ensure we boot from default (Slot A)
-rm -f /boot/firmware/autofail.txt
+dd if=/dev/zero of=/dev/sda3 bs=4M status=progress
 
 reboot
 exit 0

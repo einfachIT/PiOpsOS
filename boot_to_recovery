@@ -4,20 +4,13 @@ if [ "$EUID" -ne 0 ]
   exit
 fi
 
-echo Rebooting to recovery partition in 5 seconds
+echo Factory resetting overlay partition and rebooting in 5 seconds
 sleep 5
 
 if [ "$1" = "restore" ]; then
     echo Automatic restore selected
+    dd if=/dev/zero of=/dev/sda3 bs=4M status=progress
     touch /boot/firmware/restore
-fi
-
-# Trigger A/B fallback via autoboot.txt tryboot
-touch /boot/firmware/autofail.txt
-
-if [ -f "/boot/firmware/custom.toml.bak" ]; then
-    mv /boot/firmware/custom.toml.bak /boot/firmware/custom.toml
-    sed -i '1{s|$| init=/usr/lib/raspberrypi-sys-mods/firstboot|}' /boot/firmware/cmdline.txt
 fi
 
 ( sleep 10; reboot ) &
