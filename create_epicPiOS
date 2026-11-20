@@ -241,11 +241,12 @@ cat > "${BOOT_A_MOUNT}/autoboot.txt" <<AUTOFW
 boot_partition=1
 AUTOFW
 
-# ---- cmdline.txt — point root to correct partition based on boot partition ----
-# p1 (boot_a) → root=p3 (base rootfs, no overlay)
+# ---- cmdline.txt — both point root to p3 (base rootfs) ----
+# p1 (boot_a) → no overlay (rollback mode)
 sed -i -r "s|root=PARTUUID=[^ ]+|root=PARTUUID=${ROOTFS_PARTUUID}|g" "${BOOT_A_MOUNT}/cmdline.txt"
-# p2 (boot_b) → root=p4 (overlay rootfs, with overlay)
-sed -i -r "s|root=PARTUUID=[^ ]+|root=PARTUUID=${OVERLAY_PARTUUID}|g" "${BOOT_B_MOUNT}/cmdline.txt"
+# p2 (boot_b) → with overlay (normal mode)
+sed -i -r "s|root=PARTUUID=[^ ]+|root=PARTUUID=${ROOTFS_PARTUUID}|g" "${BOOT_B_MOUNT}/cmdline.txt"
+sed -i -r "s| rootwait| rootwait overlayroot=device:dev=${OVERLAY_PARTUUID},fstype=ext4,mkfs=0|g" "${BOOT_B_MOUNT}/cmdline.txt"
 # Then replace fsck.repair=yes with fsck.mode=skip (don't fsck read-only root)
 sed -i -r 's|fsck\.repair=yes|fsck.mode=skip|g' "${BOOT_A_MOUNT}/cmdline.txt"
 sed -i -r 's|fsck\.repair=yes|fsck.mode=skip|g' "${BOOT_B_MOUNT}/cmdline.txt"
@@ -258,61 +259,25 @@ proc            /proc   proc  defaults       0  0
 PARTUUID=${BOOT_A_PARTUUID}  ${BOOT_MOUNT}  vfat  defaults       0  2
 EOF
 
-# ---- overlayroot.conf — tells Pi OS to use p4 as the writable overlay ----
-# This is the default for boot_b. For boot_a, piops-boot-switch.service disables it.
-cat > "${ROOTFS_MOUNT}/etc/overlayroot.conf" <<EOF
-overlayroot="overlayfs:partuuid=${OVERLAY_PARTUUID}"
-EOF
+# ---- Install overlayroot package and configure initramfs ----
+# The official Pi OS overlayroot package handles the overlay activation via cmdline.txt
+# p1 boots with root=p3 only (no overlay — rollback)
+# p2 boots with root=p3 + overlayroot=dev=p4 (with overlay — normal)
 
-# ---- Store overlay PARTUUID for runtime lookup ----
-cat > "${ROOTFS_MOUNT}/etc/piops.conf" <<EOF
-OVERLAY_PARTUUID=${OVERLAY_PARTUUID}
-EOF
+# Install overlayroot (provides overlayroot.service that reads cmdline.txt)
+echo "Installing overlayroot package..."
+chroot "${ROOTFS_MOUNT}" apt-get update -qq 2>/dev/null || true
+chroot "${ROOTFS_MOUNT}" apt-get install -y -qq overlayroot 2>/dev/null || true
 
-# ---- Create boot-switch systemd service ----
-# This runs early in boot to decide whether to enable overlay (boot_b) or not (boot_a)
-cat > "${ROOTFS_MOUNT}/etc/systemd/system/piops-boot-switch.service" <<'EOF'
-[Unit]
-Description=PiOpsOS: Switch boot mode based on autoboot.txt
-Before=overlayroot.service
-After=local-fs.target
-Requires=local-fs.target
-
-[Service]
-Type=oneshot
-ExecStart=/usr/local/bin/piops-boot-switch.sh
-RemainAfterExit=yes
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-# ---- Create boot-switch script ----
-cat > "${ROOTFS_MOUNT}/usr/local/bin/piops-boot-switch.sh" <<'BOOTSWITCH'
-#!/bin/bash
-set -euo pipefail
-
-BOOT_AUTOTXT="/boot/firmware/autoboot.txt"
-
-# Read boot partition selection from autoboot.txt
-BOOT_PARTITION=$(grep -o 'boot_partition=[0-9]*' "$BOOT_AUTOTXT" 2>/dev/null | cut -d= -f2 || echo "1")
-
-if [ "$BOOT_PARTITION" = "1" ]; then
-    # boot_a: disable overlay, use p3 directly as root
-    echo 'overlayroot="disabled"' > /etc/overlayroot.conf
-else
-    # boot_b: enable overlay with p4 as upper layer on p3
-    OVERLAY_PARTUUID=$(cat /etc/piops.conf 2>/dev/null | grep OVERLAY_PARTUUID | cut -d= -f2)
-    if [ -n "$OVERLAY_PARTUUID" ]; then
-        echo "overlayroot=\"overlayfs:partuuid=${OVERLAY_PARTUUID}\"" > /etc/overlayroot.conf
-    fi
+# Ensure auto_initramfs=1 is in config.txt for initramfs generation
+# (overlayroot needs to be included in the initramfs)
+if ! grep -q "auto_initramfs=1" "${BOOT_A_MOUNT}/config.txt" 2>/dev/null; then
+    echo "auto_initramfs=1" >> "${BOOT_A_MOUNT}/config.txt"
 fi
-BOOTSWITCH
 
-chmod +x "${ROOTFS_MOUNT}/usr/local/bin/piops-boot-switch.sh"
-
-# Enable the boot-switch service
-ln -sf /etc/systemd/system/piops-boot-switch.service "${ROOTFS_MOUNT}/etc/systemd/system/multi-user.target.wants/piops-boot-switch.service"
+# Update initramfs to include overlayroot module
+echo "Updating initramfs..."
+chroot "${ROOTFS_MOUNT}" update-initramfs -u 2>/dev/null || echo "⚠ initramfs update skipped (may need to run on-device)"
 
 # ---- Copy helper scripts to boot A partition ----
 cp custom.toml               "${BOOT_A_MOUNT}/custom.toml"
