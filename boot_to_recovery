@@ -1,24 +1,46 @@
 #!/bin/bash
-if [ "$EUID" -ne 0 ]
-  then echo "Please run as root"
-  exit
+set -e
+
+if [ "$EUID" -ne 0 ]; then
+  echo "Please run as root"
+  exit 1
 fi
 
-echo Rebooting to recovery partition in 5 seconds
-sleep 5
+echo "[PiOpsOS] Switching boot partition..."
 
-if [ "$1" = "restore" ]; then
-    echo Automatic restore selected
-    touch /boot/firmware/restore
+BOOT_FIRMWARE="/boot/firmware"
+BOOT_OTHER="/boot/b"
+
+# Detect which boot partition is currently active
+CURRENT_PART=$(grep -oP 'boot_partition=\K[0-9]+' "${BOOT_FIRMWARE}/autoboot.txt" 2>/dev/null || echo "1")
+
+if [ "$CURRENT_PART" = "1" ]; then
+  echo "Currently on boot A (partition 1) → switching to boot B (partition 2)"
+  # Copy current boot files to boot B (in case they haven't been synced)
+  if mountpoint -q "${BOOT_OTHER}" 2>/dev/null; then
+    rsync -av --delete \
+      --exclude="cmdline.txt" \
+      --exclude="autoboot.txt" \
+      --exclude="custom.toml" \
+      "${BOOT_FIRMWARE}/" "${BOOT_OTHER}/"
+  fi
+  # Toggle autoboot.txt to boot partition 2
+  cat > "${BOOT_FIRMWARE}/autoboot.txt" <<AUTOFW
+[all]
+tryboot_a_b=1
+boot_partition=2
+AUTOFW
+else
+  echo "Currently on boot B (partition 2) → switching to boot A (partition 1)"
+  cat > "${BOOT_FIRMWARE}/autoboot.txt" <<AUTOFW
+[all]
+tryboot_a_b=1
+boot_partition=1
+AUTOFW
 fi
 
-if [ -f "/boot/firmware/custom.toml.bak" ]; then
-    mv /boot/firmware/custom.toml.bak /boot/firmware/custom.toml
-    sed -i '1{s|$| init=/usr/lib/raspberrypi-sys-mods/firstboot|}' /boot/firmware/cmdline.txt
-fi
+echo "Rebooting in 10 seconds..."
+sleep 10
 
-sed -i 's/mmcblk0p3/mmcblk0p2/' /boot/firmware/cmdline.txt
-
-( sleep 10; reboot ) &
-
+reboot
 exit 0

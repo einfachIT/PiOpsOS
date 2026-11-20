@@ -2,234 +2,336 @@
 set -e
 set -x
 
-
-# You really need to be root to do this
-if [ "$EUID" -ne 0 ]
-  then echo "Please run as root or sudo"
-  exit
-fi
-
-# Install Software
-apt update
-apt install -y uuid-runtime parted curl unzip kpartx xz-utils fdisk
-
-# Get Urls of used images
-read -r -p "What is the url of the recovery os image? " RECOVERY_OS_URL
-read -r -p "What is the url of the main os image? " MAIN_OS_URL
-
+# ==================== CONFIGURATION ====================
+BOOT_MOUNT="/boot/firmware"
 WORKDIR="./tmp"
-if [ ! -d $WORKDIR ]; then
-  mkdir $WORKDIR
-  if ! [ $? -eq 0 ]; then
-      echo I couldn\'t create that directory, sorry.
-      exit 0
+
+# Auto-detect device: try /dev/nvme* first, then /dev/sd*, then /dev/mmcblk*
+# User can override with: export DEVICE=/dev/sda
+if [ -z "${DEVICE:-}" ]; then
+  if ls /dev/nvme* 1>/dev/null 2>&1; then
+    DEVICE=$(ls /dev/nvme* | head -1)
+    echo "Auto-detected NVMe device: ${DEVICE}"
+  elif ls /dev/sd* 1>/dev/null 2>&1; then
+    DEVICE=$(ls /dev/sd* | head -1)
+    echo "Auto-detected USB/SD device: ${DEVICE}"
+  elif ls /dev/mmcblk* 1>/dev/null 2>&1; then
+    DEVICE=$(ls /dev/mmcblk* | head -1)
+    echo "Auto-detected SD card device: ${DEVICE}"
+  else
+    echo "ERROR: Could not auto-detect device. Set DEVICE env var."
+    echo "  export DEVICE=/dev/sda"
+    echo "  export DEVICE=/dev/nvme0n1"
+    echo "  export DEVICE=/dev/mmcblk0"
+    exit 1
   fi
 fi
 
+# ==================== FUNCTIONS ====================
 
-# ZIP filenames
-RECOVERY_OS=${RECOVERY_OS_URL##*\/}
-MAIN_OS=${MAIN_OS_URL##*\/}
+# Download and decompress if not already done
+download_or_use() {
+  local base="$1" url="$2"
+  local filename="${url##*/}"
+  local img="${WORKDIR}/${base}.img"
+  local archive="${WORKDIR}/${filename}"
 
-
-# Filenames without extensions
-RECOVERY_OS_IMG=${RECOVERY_OS%.*}
-RECOVERY_OS_BASE=${RECOVERY_OS_IMG%.*}
-MAIN_OS_IMG=${MAIN_OS%.*}
-MAIN_OS_BASE=${MAIN_OS_IMG%.*}
-
-
-echo Target version for recovery partition is $RECOVERY_OS
-echo Target version for root partition is $MAIN_OS
-
-# Do we have an img for main os? otherwise download
-if [ ! -f "./tmp/$MAIN_OS_BASE.img" ]; then
-  echo $MAIN_OS_IMG not found
-  if [ ! -f "./tmp/$MAIN_OS" ]; then
-    echo $MAIN_OS not found, downloading
-    curl -L $MAIN_OS_URL --output ./tmp/$MAIN_OS
-  fi
-  echo Unzipping $MAIN_OS
-  unxz ./tmp/$MAIN_OS -c > ./tmp/$MAIN_OS_IMG
-else
-  echo $MAIN_OS_IMG found
-fi
-
-# create hardlink with different name if recovery and main os are the same
-if [ $RECOVERY_OS == $MAIN_OS ]; then
-  RECOVERY_OS_BASE=${MAIN_OS_BASE}-recovery
-  RECOVERY_OS_IMG=${RECOVERY_OS_BASE}.img
-  RECOVERY_OS=${RECOVERY_OS_IMG}.xz
-  if [ ! -f ./tmp/${RECOVERY_OS_IMG} ]; then
-    ln ./tmp/$MAIN_OS_IMG ./tmp/${RECOVERY_OS_IMG}
-  fi
-fi
-
- 
-# Do we have an img for recovery os? otherwise download
-if [ ! -f "./tmp/$RECOVERY_OS_IMG" ]; then
-  echo $RECOVERY_OS_IMG not found
-  if [ ! -f "./tmp/$RECOVERY_OS" ]; then
-    echo $RECOVERY_OS not found, downloading
-    curl -L $RECOVERY_OS_URL --output ./tmp/$RECOVERY_OS
-  fi
-  echo Unzipping $RECOVERY_OS
-  unxz ./tmp/$RECOVERY_OS -c > ./tmp/$RECOVERY_OS_IMG
-else
-  echo $RECOVERY_OS_BASE.img found
-fi
-
-
-
-calculate_partitions() {
-  # calculate sizes in sectors
-  RECOVERY_BOOT_START=$(fdisk -lu ./tmp/$RECOVERY_OS_BASE.img | grep .img1 |  tr -d \* | sed -n "s/ \+/ /gp" | cut -d ' ' -f 2)
-  RECOVERY_BOOT_LENGTH=$(fdisk -lu ./tmp/$RECOVERY_OS_BASE.img | grep .img1 |  tr -d \* | sed -n "s/ \+/ /gp" | cut -d ' ' -f 4)
-
-  MAIN_BOOT_START=$(fdisk -lu ./tmp/$MAIN_OS_BASE.img | grep .img1 |  tr -d \* | sed -n "s/ \+/ /gp" | cut -d ' ' -f 2)
-  MAIN_BOOT_LENGTH=$(fdisk -lu ./tmp/$MAIN_OS_BASE.img | grep .img1 |  tr -d \* | sed -n "s/ \+/ /gp" | cut -d ' ' -f 2)
-  
-  RECOVERY_ROOT_LENGTH=$(fdisk -lu ./tmp/$RECOVERY_OS_BASE.img | grep .img2 |  tr -d \* | sed -n "s/ \+/ /gp" | cut -d ' ' -f 4)
-
-  MAIN_ROOT_LENGTH=$(fdisk -lu ./tmp/$MAIN_OS_BASE.img | grep .img2 |  tr -d \* | sed -n "s/ \+/ /gp" | cut -d ' ' -f 4)
-
-
-  PARTITION_1=$RECOVERY_BOOT_LENGTH
-  PARTITION_1b=$MAIN_BOOT_LENGTH
-  PARTITION_2=$((RECOVERY_ROOT_LENGTH+MAIN_ROOT_LENGTH))
-  PARTITION_3=$MAIN_ROOT_LENGTH
-
-  SECTORS=$((PARTITION_1+PARTITION_1b+PARTITION_2+PARTITION_3))
-  IMAGE_4MB=$((((SECTORS * 512) / 4194304) + 1))
-  
-  IMAGE_BYTES=$((IMAGE_4MB * 4194304))
-  
-  dd if=/dev/zero bs=4M count=$IMAGE_4MB status=progress > ./tmp/$MAIN_OS_BASE.restore.img
-  
-  UUID_RESTORE=$(uuidgen)
-  UUID_ROOTFS=$(uuidgen)
-  PARTUUID=$(tr -dc 'a-f0-9' < /dev/urandom 2>/dev/null | head -c8)
-  PARTITION_1_START=$RECOVERY_BOOT_START
-  PARTITION_2_START=$((PARTITION_1_START + PARTITION_1))
-  PARTITION_3_START=$((PARTITION_2_START + PARTITION_2))
+  [ -f "$img" ] && echo "✓ ${base}.img exists" && return
+  [ ! -f "$archive" ] && { echo "Downloading ${filename}..."; curl -L "$url" -o "$archive"; }
+  echo "Decompressing ${filename}..."
+  unxz "$archive" -c > "$img"
 }
-calculate_partitions
 
-# create partitions
-sfdisk ./tmp/$MAIN_OS_BASE.restore.img <<EOF
+# Extract field N from fdisk -lu output for partition P
+get_fdisk_field() {
+  local base
+  base=$(basename "$1")
+  fdisk -lu "$1" | grep -F "${base}${2}" | tr -d '*' | tr -s ' ' | cut -d' ' -f"$3"
+}
+
+# Cleanup loop devices and mounts on exit (success or failure)
+cleanup() {
+  echo "Cleaning up..."
+
+  for m in "$BOOT_MOUNT_MOUNT" "$ROOTFS_MOUNT" "$OVERLAY_MOUNT"; do
+    if mountpoint -q "$m" 2>/dev/null; then
+      umount "$m" 2>/dev/null || true
+    fi
+  done
+
+  sleep 2
+
+  losetup -a | grep -E '\.(restore|lite|img)$' | cut -d: -f1 | while read -r dev; do
+    kpartx -d "$dev" 2>/dev/null || true
+  done
+
+  losetup -a | grep -E '\.(restore|lite|img)$' | cut -d: -f1 | while read -r dev; do
+    losetup -d "$dev" 2>/dev/null || true
+  done
+
+  losetup -a | grep -E 'loop[0-9]+' | grep -E '\.(restore|img)$' | cut -d: -f1 | while read -r dev; do
+    umount -l "$dev"* 2>/dev/null || true
+    kpartx -d "$dev" 2>/dev/null || true
+    losetup -d "$dev" 2>/dev/null || true
+  done
+
+  echo "Cleanup complete."
+}
+trap cleanup EXIT
+
+# ==================== INSTALL SOFTWARE ====================
+export DEBIAN_FRONTEND=noninteractive
+apt update
+apt install -y uuid-runtime parted curl unzip kpartx xz-utils fdisk e2fsprogs dosfstools
+
+# ==================== PREPARATION ====================
+echo "=== PiOpsOS A/B Boot Image Builder (USB/NVMe/SD + Trixie compatible) ==="
+mkdir -p "$WORKDIR"
+
+# Accept URLs from args or prompt
+RECOVERY_OS_URL="${1:-$(read -r -p "Recovery OS URL: " u; echo $u)}"
+MAIN_OS_URL="${2:-$(read -r -p "Main OS URL: " u; echo $u)}"
+
+RECOVERY_OS="${RECOVERY_OS_URL##*/}"
+MAIN_OS="${MAIN_OS_URL##*/}"
+RECOVERY_OS_BASE="${RECOVERY_OS%.*}"
+RECOVERY_OS_BASE="${RECOVERY_OS_BASE%.*}"
+MAIN_OS_BASE="${MAIN_OS%.*}"
+MAIN_OS_BASE="${MAIN_OS_BASE%.*}"
+
+echo "Recovery OS: ${RECOVERY_OS_BASE}"
+echo "Main OS:     ${MAIN_OS_BASE}"
+
+# Download images (deduplicates if both are the same file)
+if [ "$RECOVERY_OS" = "$MAIN_OS" ]; then
+  download_or_use "$MAIN_OS_BASE" "$MAIN_OS_URL"
+  RECOVERY_OS_BASE="${MAIN_OS_BASE}-recovery"
+  [ ! -f "${WORKDIR}/${RECOVERY_OS_BASE}.img" ] && \
+    cp "${WORKDIR}/${MAIN_OS_BASE}.img" "${WORKDIR}/${RECOVERY_OS_BASE}.img"
+else
+  download_or_use "$RECOVERY_OS_BASE" "$RECOVERY_OS_URL"
+  download_or_use "$MAIN_OS_BASE" "$MAIN_OS_URL"
+fi
+
+# ==================== CALCULATE PARTITIONS ====================
+echo "Calculating partitions..."
+
+# Boot partition info from the OS images (both should have same boot partition size)
+RECOVERY_BOOT_START=$(get_fdisk_field "${WORKDIR}/${RECOVERY_OS_BASE}.img" 1 2)   # start sector
+RECOVERY_BOOT_LEN=$(get_fdisk_field "${WORKDIR}/${RECOVERY_OS_BASE}.img" 1 4)    # length
+# Use the larger of recovery/main boot partition size for both boot partitions
+MAIN_BOOT_LEN=$(get_fdisk_field "${WORKDIR}/${MAIN_OS_BASE}.img" 1 4)
+BOOT_SIZE=$( [ "$RECOVERY_BOOT_LEN" -gt "$MAIN_BOOT_LEN" ] && echo "$RECOVERY_BOOT_LEN" || echo "$MAIN_BOOT_LEN" )
+
+# Root partition info from the main OS image
+MAIN_ROOT_LEN=$(get_fdisk_field "${WORKDIR}/${MAIN_OS_BASE}.img" 2 4)            # root partition size
+
+# New 4-partition layout (MBR compatible):
+# p1: Boot A   (FAT32) — base kernel/dtbs/firmware matching p3
+# p2: Boot B   (FAT32) — updated kernel/dtbs/firmware after kernel updates
+# p3: Base rootfs (ext4, ro) — Pi OS Trixie + customizations baked in
+# p4: Overlay  (ext4, rw) — runtime changes, logs, configs
+P1_SIZE=$BOOT_SIZE        # Boot A
+P2_SIZE=$BOOT_SIZE        # Boot B (same size as Boot A)
+P3_SIZE=$MAIN_ROOT_LEN    # Base rootfs
+P4_SIZE=2097152           # Overlay = 1 GB (2 * 1024 * 1024 sectors)
+TOTAL_SECTORS=$((RECOVERY_BOOT_START + P1_SIZE + P2_SIZE + P3_SIZE + P4_SIZE))
+IMAGE_MB=$(( (TOTAL_SECTORS * 512 / 4194304) + 1 ))
+
+echo "Image size: ~${IMAGE_MB} MB"
+
+# ==================== CREATE IMAGE ====================
+echo "Creating image..."
+dd if=/dev/zero of="${WORKDIR}/${MAIN_OS_BASE}.restore.img" bs=4M count="$IMAGE_MB" status=progress
+
+UUID_BASE_ROOT=$(uuidgen)
+PARTUUID=$(tr -dc 'a-f0-9' < /dev/urandom 2>/dev/null | head -c8)
+
+# Partition layout (4 partitions, MBR compatible)
+sfdisk "${WORKDIR}/${MAIN_OS_BASE}.restore.img" <<EOF
 label: dos
 label-id: 0x${PARTUUID}
 unit: sectors
-
-$MAIN_OS_BASE.img1 : start=${PARTITION_1_START}, size=${PARTITION_1}, type=c
-$MAIN_OS_BASE.img2 : start=${PARTITION_2_START}, size=${PARTITION_2}, type=83
-$MAIN_OS_BASE.img3 : start=${PARTITION_3_START}, size=${PARTITION_3}, type=83
+1 : start=${RECOVERY_BOOT_START}, size=${P1_SIZE}, type=c
+2 : start=$((RECOVERY_BOOT_START + P1_SIZE)), size=${P2_SIZE}, type=c
+3 : start=$((RECOVERY_BOOT_START + P1_SIZE + P2_SIZE)), size=${P3_SIZE}, type=83
+4 : start=$((RECOVERY_BOOT_START + P1_SIZE + P2_SIZE + P3_SIZE)), size=${P4_SIZE}, type=83
 EOF
 
+# ==================== SETUP LOOP DEVICES ====================
+echo "Setting up loop devices..."
+losetup -v -f "${WORKDIR}/${MAIN_OS_BASE}.restore.img"
+losetup -v -f "${WORKDIR}/${RECOVERY_OS_BASE}.img"
+losetup -v -f "${WORKDIR}/${MAIN_OS_BASE}.img"
 
-# Mount images as devices
-losetup -v -f ./tmp/$MAIN_OS_BASE.restore.img
-losetup -v -f ./tmp/$RECOVERY_OS_BASE.img
-losetup -v -f ./tmp/$MAIN_OS_BASE.img
+BLANK_LOOP=$(losetup -j "${WORKDIR}/${MAIN_OS_BASE}.restore.img" | grep -o '[0-9]*' | head -1)
+RECOVERY_LOOP=$(losetup -j "${WORKDIR}/${RECOVERY_OS_BASE}.img" | grep -o '[0-9]*' | head -1)
+MAIN_LOOP=$(losetup -j "${WORKDIR}/${MAIN_OS_BASE}.img" | grep -o '[0-9]*' | head -1)
 
-BLANK_IMAGE_LOOPDEV=$(losetup -a | grep loop | grep $MAIN_OS_BASE.restore.img | cut -d ' ' -f 1 | tr -dc '0-9')
-kpartx -v -a /dev/loop$BLANK_IMAGE_LOOPDEV
+kpartx -v -a "/dev/loop${BLANK_LOOP}"
+kpartx -v -a "/dev/loop${RECOVERY_LOOP}"
+kpartx -v -a "/dev/loop${MAIN_LOOP}"
 
-RECOVERY_IMAGE_LOOPDEV=$(losetup -a | grep loop | grep $RECOVERY_OS_BASE.img | cut -d ' ' -f 1 | tr -dc '0-9')
-kpartx -v -a /dev/loop$RECOVERY_IMAGE_LOOPDEV
+# ==================== COPY DATA ====================
+echo "Copying data to partitions..."
 
-MAIN_IMAGE_LOOPDEV=$(losetup -a | grep loop | grep $MAIN_OS_BASE.img | cut -d ' ' -f 1 | tr -dc '0-9')
-kpartx -v -a /dev/loop$MAIN_IMAGE_LOOPDEV
+# p1: Boot A = recovery boot content (base kernel/dtbs/firmware)
+dd if="/dev/mapper/loop${RECOVERY_LOOP}p1" of="/dev/mapper/loop${BLANK_LOOP}p1" bs=4M status=progress
 
-# Copying boot partition
-dd if=/dev/mapper/loop${RECOVERY_IMAGE_LOOPDEV}p1 of=/dev/mapper/loop${BLANK_IMAGE_LOOPDEV}p1 status=progress bs=4M
-echo Copying Raspbian Lite to partition 2
-dd if=/dev/mapper/loop${RECOVERY_IMAGE_LOOPDEV}p2 of=/dev/mapper/loop${BLANK_IMAGE_LOOPDEV}p2 status=progress bs=4M
-echo Copying Raspbian Full to partition 3
-dd if=/dev/mapper/loop${MAIN_IMAGE_LOOPDEV}p2 of=/dev/mapper/loop${BLANK_IMAGE_LOOPDEV}p3 status=progress bs=4M
+# p2: Boot B = copy from p1 (initially identical, diverges after kernel updates)
+dd if="/dev/mapper/loop${BLANK_LOOP}p1" of="/dev/mapper/loop${BLANK_LOOP}p2" bs=4M status=progress
 
-# This seems to be needed to let the system catch up
-sleep 5
+# p3: Base rootfs = main OS root filesystem (read-only, immutable base)
+dd if="/dev/mapper/loop${MAIN_LOOP}p2" of="/dev/mapper/loop${BLANK_LOOP}p3" bs=4M status=progress
 
-# Setting IDs
-tune2fs /dev/mapper/loop${BLANK_IMAGE_LOOPDEV}p2 -U ${UUID_RESTORE}
-e2label /dev/mapper/loop${BLANK_IMAGE_LOOPDEV}p2 recoveryfs
-e2fsck -y -f /dev/mapper/loop${BLANK_IMAGE_LOOPDEV}p3
-tune2fs /dev/mapper/loop${BLANK_IMAGE_LOOPDEV}p3 -U ${UUID_ROOTFS}
+# p4: Overlay — start empty (will fill during first boot)
+dd if=/dev/zero of="/dev/mapper/loop${BLANK_LOOP}p4" bs=4M count=0 status=none
 
-# Expanding recovery partition to full size
-e2fsck -pf /dev/mapper/loop${BLANK_IMAGE_LOOPDEV}p2
-resize2fs /dev/mapper/loop${BLANK_IMAGE_LOOPDEV}p2
+# ==================== FORMAT PARTITIONS ====================
+echo "Formatting partitions..."
 
-# mount filesystems
-mkdir -p tmp/mnt/restore_boot
-mkdir -p tmp/mnt/restore_recovery
-mkdir -p tmp/mnt/restore_rootfs
+# Create FAT32 filesystem for boot partitions
+mkfs.vfat -F 32 -n "boot_a" "/dev/mapper/loop${BLANK_LOOP}p1"
+mkfs.vfat -F 32 -n "boot_b" "/dev/mapper/loop${BLANK_LOOP}p2"
 
-echo Mounting boot
-mount /dev/mapper/loop${BLANK_IMAGE_LOOPDEV}p1 tmp/mnt/restore_boot
-echo Mounting recovery
-mount /dev/mapper/loop${BLANK_IMAGE_LOOPDEV}p2 tmp/mnt/restore_recovery
-echo Mounting rootfs
-mount /dev/mapper/loop${BLANK_IMAGE_LOOPDEV}p3 tmp/mnt/restore_rootfs
+# ---- Create mount point for boot B on rootfs ----
+mkdir -p "${ROOTFS_MOUNT}/boot/b"
 
-sleep 1
+# Create ext4 filesystem for overlay partition
+mkfs.ext4 -L "overlay" "/dev/mapper/loop${BLANK_LOOP}p4"
 
-# Set boot partition to new ID and partition 3
-sed -i -r "s|(PARTUUID=.*?\-02)|/dev/mmcblk0p3|g" tmp/mnt/restore_boot/cmdline.txt
-echo Done
+# ==================== MOUNT AND CONFIGURE ====================
+echo "Mounting partitions..."
+BOOT_A_MOUNT="${WORKDIR}/mnt/boot_a"
+BOOT_B_MOUNT="${WORKDIR}/mnt/boot_b"
+ROOTFS_MOUNT="${WORKDIR}/mnt/rootfs"
+OVERLAY_MOUNT="${WORKDIR}/mnt/overlay"
 
-# Fix fstabs
-UUID_BOOT=$(blkid -o export /dev/mapper/loop${BLANK_IMAGE_LOOPDEV}p1 | egrep '^UUID=' | cut -d'=' -f2)
-# write fstab
-cat << EOF > ./tmp/mnt/restore_rootfs/etc/fstab
-proc                     /proc  proc    defaults          0       0
-/dev/mmcblk0p1  /boot/firmware  vfat    defaults          0       2
-/dev/mmcblk0p3  /      ext4    defaults,noatime  0       1
+mkdir -p "$BOOT_A_MOUNT" "$BOOT_B_MOUNT" "$ROOTFS_MOUNT" "$OVERLAY_MOUNT"
+
+mount "/dev/mapper/loop${BLANK_LOOP}p1" "$BOOT_A_MOUNT"
+mount "/dev/mapper/loop${BLANK_LOOP}p2" "$BOOT_B_MOUNT"
+mount "/dev/mapper/loop${BLANK_LOOP}p3" "$ROOTFS_MOUNT"
+mount "/dev/mapper/loop${BLANK_LOOP}p4" "$OVERLAY_MOUNT"
+
+echo "Configuring boot files..."
+
+# ---- autoboot.txt — controls which boot partition gets mounted ----
+cat > "${BOOT_A_MOUNT}/autoboot.txt" <<AUTOFW
+[all]
+tryboot_a_b=1
+boot_partition=1
+AUTOFW
+
+# ---- cmdline.txt — point root to partition 3 (base rootfs, read-only) ----
+# Also add overlayroot=dev=/dev/sdX4 so overlayroot.conf isn't needed
+sed -i -r "s|root=PARTUUID=.*|root=/dev/${DEVICE}3 rootfstype=ext4 ro|g" "${BOOT_A_MOUNT}/cmdline.txt"
+sed -i -r "s|root=PARTUUID=.*|root=/dev/${DEVICE}3 rootfstype=ext4 ro|g" "${BOOT_B_MOUNT}/cmdline.txt"
+
+# ---- fstab on base rootfs — mount boot A by default, plus overlay ----
+cat > "${ROOTFS_MOUNT}/etc/fstab" <<EOF
+proc            /proc   proc  defaults       0  0
+/dev/${DEVICE}1  ${BOOT_MOUNT}  vfat  defaults       0  2
+/dev/${DEVICE}4  /       overlay overlayfs   0       0
 EOF
 
-# Writing recovery fstab
-cat << EOF > ./tmp/mnt/restore_recovery/etc/fstab
-proc                    /proc  proc    defaults          0       0
-/dev/mmcblk0p1       /boot/firmware  vfat    defaults          0       2
-/dev/mmcblk0p2    /      ext4    defaults,noatime  0       1
+# ---- overlayroot.conf — tells Pi OS to use p4 as the writable overlay ----
+cat > "${ROOTFS_MOUNT}/etc/overlayroot.conf" <<EOF
+overlayroot="overlayfs:dev=/dev/${DEVICE}4"
 EOF
 
-# copy scripts 
-cp custom.toml ./tmp/mnt/restore_boot/custom.toml.bak # used for recovery original script will be deleted after first boot
+# ---- Copy helper scripts to boot A partition ----
+cp custom.toml               "${BOOT_A_MOUNT}/custom.toml"
+cp boot_to_recovery          "${BOOT_A_MOUNT}/"
+cp boot_to_root              "${BOOT_A_MOUNT}/"
+cp restore_root              "${BOOT_A_MOUNT}/"
+cp check_restore_gpio.py     "${BOOT_A_MOUNT}/"
 
-echo copy boot_to_recovery
-cp boot_to_recovery ./tmp/mnt/restore_boot/
+# ---- Kernel update hook — auto-copy boot files to other partition ----
+cat > "${ROOTFS_MOUNT}/etc/apt/apt.conf.d/99-piops-kernel-update" <<'HOOK'
+# PiOpsOS: After kernel update, copy new boot files to the other boot partition
+# and toggle boot_partition in autoboot.txt for A/B boot switching.
+DPkg::Post-Invoke {
+  "/usr/local/bin/piops-kernel-update-hook";
+};
+HOOK
 
-echo copy boot_to_root
-cp boot_to_root ./tmp/mnt/restore_boot/
+# ---- Kernel update hook script ----
+cat > "${ROOTFS_MOUNT}/usr/local/bin/piops-kernel-update-hook" <<'HOOKSCRIPT'
+#!/bin/bash
+# PiOpsOS Kernel Update Hook
+# Copies new boot files to the other boot partition and toggles boot_partition
 
-echo copy restore_root
-cp restore_root ./tmp/mnt/restore_boot/
+set -e
 
-echo copy check_restore_gpio
-cp check_restore_gpio.py ./tmp/mnt/restore_boot/
+BOOT_A="/boot/firmware"  # currently mounted as /boot/firmware
+BOOT_B="/boot/b"
 
-# modifying rc.locals
-sed -i '$ i /boot/firmware/restore_root' ./tmp/mnt/restore_recovery/etc/rc.local
-sed -i '$ i python3 /boot/firmware/check_restore_gpio.py' ./tmp/mnt/restore_rootfs/etc/rc.local
+# Detect current boot_partition from autoboot.txt
+CURRENT_PART=$(grep -oP 'boot_partition=\K[0-9]+' "${BOOT_A}/autoboot.txt" 2>/dev/null || echo "1")
 
-# Modify raspberry-pi-sys-mods
-# needed to make the image compatible with new imager customisation feature
-# backup firstrun.sh for reuse after recovery
-sed -i '/^mount \/boot$/a cp /boot/firmware/firstrun.sh /boot/firmware/firstrun.bak' ./tmp/mnt/restore_rootfs/usr/lib/raspberrypi-sys-mods/firstboot
-sed -i '/^mount "$FWLOC" -o rw$/a cp /boot/firmware/firstrun.sh /boot/firmware/firstrun.bak' ./tmp/mnt/restore_rootfs/usr/lib/raspberrypi-sys-mods/firstboot
+if [ "$CURRENT_PART" = "1" ]; then
+  OTHER_BOOT="$BOOT_B"
+  NEW_PART=2
+else
+  OTHER_BOOT="$BOOT_A"
+  NEW_PART=1
+fi
 
-# write image
-dd if=/dev/mapper/loop${BLANK_IMAGE_LOOPDEV}p3 of=./tmp/mnt/restore_recovery/rootfs.img status=progress bs=4M
+# Copy boot files to the other partition (kernel, dtbs, firmware)
+rsync -av --delete \
+  --exclude="cmdline.txt" \
+  --exclude="autoboot.txt" \
+  --exclude="custom.toml" \
+  "${BOOT_A}/" "${OTHER_BOOT}/"
 
-# unmounting ...
-umount tmp/mnt/restore_boot
-umount tmp/mnt/restore_recovery
-umount tmp/mnt/restore_rootfs
-sleep 1
-kpartx -v -d /dev/loop${BLANK_IMAGE_LOOPDEV}
-kpartx -v -d /dev/loop${RECOVERY_IMAGE_LOOPDEV}
-kpartx -v -d /dev/loop${MAIN_IMAGE_LOOPDEV}
-losetup --detach-all
-echo Done
+# Toggle boot_partition in autoboot.txt on the OTHER partition
+if [ -f "${OTHER_BOOT}/autoboot.txt" ]; then
+  sed -i "s/boot_partition=[0-9]/boot_partition=${NEW_PART}/" "${OTHER_BOOT}/autoboot.txt"
+fi
+
+echo "[PiOpsOS] Kernel update: copied boot files to boot partition ${NEW_PART}, toggled autoboot.txt"
+HOOKSCRIPT
+
+chmod +x "${ROOTFS_MOUNT}/usr/local/bin/piops-kernel-update-hook"
+
+# ---- Create boot_b mount point on rootfs (for kernel update hook) ----
+mkdir -p "${ROOTFS_MOUNT}/boot/b"
+
+# ---- Backup firstrun.sh for recovery (raspberrypi-sys-mods) ----
+if [ -f "${ROOTFS_MOUNT}/usr/lib/raspberrypi-sys-mods/firstboot" ]; then
+  sed -i "/^mount \\\/boot\\$/a cp /${BOOT_MOUNT}/firstrun.sh /${BOOT_MOUNT}/firstrun.bak" \
+    "${ROOTFS_MOUNT}/usr/lib/raspberrypi-sys-mods/firstboot"
+  sed -i "/^mount \\\"\$FWLOC\\\" -o rw\\$/a cp /${BOOT_MOUNT}/firstrun.sh /${BOOT_MOUNT}/firstrun.bak" \
+    "${ROOTFS_MOUNT}/usr/lib/raspberrypi-sys-mods/firstboot"
+fi
+
+# ---- Cleanup mounts ----
+echo "Unmounting..."
+umount "$BOOT_A_MOUNT"
+umount "$BOOT_B_MOUNT"
+umount "$ROOTFS_MOUNT"
+umount "$OVERLAY_MOUNT"
+
+echo ""
+echo "=== Done! ==="
+echo "Image: ${WORKDIR}/${MAIN_OS_BASE}.restore.img"
+echo "Device used: ${DEVICE}"
+echo "Partition layout:"
+echo "  p1 (boot_a):    ${P1_SIZE} sectors   (FAT32)"
+echo "  p2 (boot_b):    ${P2_SIZE} sectors   (FAT32)"
+echo "  p3 (base rootfs): ${P3_SIZE} sectors   (ext4, read-only)"
+echo "  p4 (overlay):   ${P4_SIZE} sectors   (ext4, overlay root)"
+echo ""
+echo "Boot behavior:"
+echo "  - Boot mounts p3 (base rootfs) read-only"
+echo "  - overlayroot mounts p4 as writable overlay on top"
+echo "  - All changes (logs, configs, packages) go to p4"
+echo "  - Rebooting preserves p3, p4 survives"
+echo "  - Factory reset: wipe p4, reboot (restores to customized p3)"
+echo "  - Kernel update: new files copied to other boot partition, autoboot.txt toggled"
+echo ""
+echo "To flash:"
+echo "  export DEVICE=/dev/sdX"
+echo "  sudo dd if=${WORKDIR}/${MAIN_OS_BASE}.restore.img of=\$DEVICE bs=4M status=progress"
+echo "  sudo sync"
