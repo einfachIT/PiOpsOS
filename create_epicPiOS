@@ -167,17 +167,6 @@ partprobe "/dev/loop${RECOVERY_LOOP}" 2>/dev/null || true
 partprobe "/dev/loop${MAIN_LOOP}" 2>/dev/null || true
 sleep 1
 
-# ==================== COPY DATA ====================
-echo "Copying data to partitions..."
-
-# Boot A/B partitions will be populated after formatting with FAT32
-
-# p3: Base rootfs = main OS root filesystem (readable, customizable)
-dd if="/dev/mapper/loop${MAIN_LOOP}p2" of="/dev/mapper/loop${BLANK_LOOP}p3" bs=4M status=progress
-
-# p4: Overlay — start empty (will fill during first boot)
-dd if=/dev/zero of="/dev/mapper/loop${BLANK_LOOP}p4" bs=4M count=0 status=none
-
 # ==================== FORMAT PARTITIONS ====================
 echo "Formatting partitions..."
 
@@ -190,6 +179,15 @@ mkfs.ext4 -L "rootfs" "/dev/mapper/loop${BLANK_LOOP}p3"
 
 # Create ext4 filesystem for overlay partition
 mkfs.ext4 -L "overlay" "/dev/mapper/loop${BLANK_LOOP}p4"
+
+# ==================== COPY DATA ====================
+echo "Copying data to partitions..."
+
+# p3: Base rootfs = main OS root filesystem (readable, customizable)
+dd if="/dev/mapper/loop${MAIN_LOOP}p2" of="/dev/mapper/loop${BLANK_LOOP}p3" bs=4M status=progress
+
+# p4: Overlay — start empty (will fill during first boot)
+dd if=/dev/zero of="/dev/mapper/loop${BLANK_LOOP}p4" bs=4M count=0 status=none
 
 # ---- Create mount point for boot B on rootfs ----
 mkdir -p "${ROOTFS_MOUNT}/boot/b"
@@ -236,9 +234,9 @@ get_partuuid() {
 }
 
 BOOT_A_PARTUUID=$(get_partuuid "/dev/mapper/loop${BLANK_LOOP}p1")
-ROOTFS_PARTUUID=$(get_partuuid "/dev/mapper/loop${BLANK_LOOP}p2")
-OVERLAY_PARTUUID=$(get_partuuid "/dev/mapper/loop${BLANK_LOOP}p3")
-BOOT_B_PARTUUID=$(get_partuuid "/dev/mapper/loop${BLANK_LOOP}p4")
+BOOT_B_PARTUUID=$(get_partuuid "/dev/mapper/loop${BLANK_LOOP}p2")
+ROOTFS_PARTUUID=$(get_partuuid "/dev/mapper/loop${BLANK_LOOP}p3")
+OVERLAY_PARTUUID=$(get_partuuid "/dev/mapper/loop${BLANK_LOOP}p4")
 
 # Validate — fail hard if any PARTUUID is empty
 for name in BOOT_A_PARTUUID BOOT_B_PARTUUID ROOTFS_PARTUUID OVERLAY_PARTUUID; do
