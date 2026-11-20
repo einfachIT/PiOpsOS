@@ -1,0 +1,32 @@
+name: Runner Test
+
+on:
+  workflow_dispatch:
+
+jobs:
+  check:
+    name: Self-hosted runner check
+    runs-on: self-hosted
+    steps:
+      - name: Greetings
+        run: echo "Hello from the self-hosted runner!"
+
+      - name: Show system info
+        run: |
+          echo "=== Runner Check ==="
+          uname -a
+          echo ""
+          echo "Hostname:"
+          hostname
+          echo ""
+          echo "CPU:"
+          lscpu | grep -E "Model name|Architecture|CPU\(s\)"
+          echo ""
+          echo "Memory:"
+          free -h
+          echo ""
+          echo "Disk:"
+          df -h /
+          echo ""
+          echo "Network:"
+          ip addr show | grep -E "inet |link/ether " | head -10
