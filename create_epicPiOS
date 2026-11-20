@@ -6,21 +6,17 @@ set -x
 BOOT_MOUNT="/boot/firmware"
 WORKDIR="./tmp"
 
-# Device to flash to (configure via DEVICE env var)
-# Defaults to first USB device, falls back to SD card
+# Device used for flashing (shown in help text at end)
+# User sets this before running the script:
+#   export DEVICE=/dev/sda    (USB stick)
+#   export DEVICE=/dev/mmcblk0 (SD card)
+#   export DEVICE=/dev/nvme0n1 (NVMe)
 if [ -z "${DEVICE:-}" ]; then
-  if ls /dev/sd* 1>/dev/null 2>&1; then
-    DEVICE=$(ls /dev/sd* | head -1)
-    echo "Defaulting to USB device: ${DEVICE}"
-  elif ls /dev/mmcblk* 1>/dev/null 2>&1; then
-    DEVICE=$(ls /dev/mmcblk* | head -1)
-    echo "Defaulting to SD card device: ${DEVICE}"
-  else
-    echo "ERROR: No block device found. Set DEVICE env var."
-    echo "  export DEVICE=/dev/sda   (USB/external drive)"
-    echo "  export DEVICE=/dev/mmcblk0 (SD card)"
-    exit 1
-  fi
+  echo "ERROR: DEVICE not set."
+  echo "  export DEVICE=/dev/sda         (USB stick)"
+  echo "  export DEVICE=/dev/mmcblk0     (SD card)"
+  echo "  export DEVICE=/dev/nvme0n1     (NVMe)"
+  exit 1
 fi
 
 # ==================== FUNCTIONS ====================
