@@ -6,23 +6,14 @@ set -x
 BOOT_MOUNT="/boot/firmware"
 WORKDIR="./tmp"
 
-# Auto-detect device: try /dev/nvme* first, then /dev/sd*, then /dev/mmcblk*
-# User can override with: export DEVICE=/dev/sda
+# Device to flash to (configure via DEVICE env var, default: first USB/SD device)
 if [ -z "${DEVICE:-}" ]; then
-  if ls /dev/nvme* 1>/dev/null 2>&1; then
-    DEVICE=$(ls /dev/nvme* | head -1)
-    echo "Auto-detected NVMe device: ${DEVICE}"
-  elif ls /dev/sd* 1>/dev/null 2>&1; then
+  if ls /dev/sd* 1>/dev/null 2>&1; then
     DEVICE=$(ls /dev/sd* | head -1)
-    echo "Auto-detected USB/SD device: ${DEVICE}"
-  elif ls /dev/mmcblk* 1>/dev/null 2>&1; then
-    DEVICE=$(ls /dev/mmcblk* | head -1)
-    echo "Auto-detected SD card device: ${DEVICE}"
+    echo "Defaulting to USB/SD device: ${DEVICE}"
   else
-    echo "ERROR: Could not auto-detect device. Set DEVICE env var."
+    echo "ERROR: No USB/SD device found and DEVICE not set."
     echo "  export DEVICE=/dev/sda"
-    echo "  export DEVICE=/dev/nvme0n1"
-    echo "  export DEVICE=/dev/mmcblk0"
     exit 1
   fi
 fi
@@ -262,8 +253,8 @@ AUTOFW
 
 # ---- cmdline.txt — point root to partition 3 (base rootfs, read-only) ----
 # Replace the entire root=PARTUUID=XXX-NN value (including partition suffix), preserving rootwait, quiet, init=, etc.
-sed -i -r 's|root=PARTUUID=[^ ]+|root=PARTUUID=${ROOTFS_PARTUUID}|g' "${BOOT_A_MOUNT}/cmdline.txt"
-sed -i -r 's|root=PARTUUID=[^ ]+|root=PARTUUID=${ROOTFS_PARTUUID}|g' "${BOOT_B_MOUNT}/cmdline.txt"
+sed -i -r "s|root=PARTUUID=[^ ]+|root=PARTUUID=${ROOTFS_PARTUUID}|g" "${BOOT_A_MOUNT}/cmdline.txt"
+sed -i -r "s|root=PARTUUID=[^ ]+|root=PARTUUID=${ROOTFS_PARTUUID}|g" "${BOOT_B_MOUNT}/cmdline.txt"
 # Then replace fsck.repair=yes with fsck.mode=skip (don't fsck read-only root)
 sed -i -r 's|fsck\.repair=yes|fsck.mode=skip|g' "${BOOT_A_MOUNT}/cmdline.txt"
 sed -i -r 's|fsck\.repair=yes|fsck.mode=skip|g' "${BOOT_B_MOUNT}/cmdline.txt"
