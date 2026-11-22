@@ -1,0 +1,16 @@
+{
+  "os_list": [
+    {
+      "name": "Raspberry Pi DevOPS OS",
+      "description": "Custom Trixie image with cloud-init support and factory reset capability",
+      "url": "https://github.com/einfachIT/PiOpsOS/releases/download/7.0.0/2026-10-06-raspios-trixie-arm64-lite.restore.img.xz",
+      "icon": "https://raspberrypi.org",
+      "release_date": "2026-11-22",
+      "extract_size": 5639241728,
+      "image_download_size": 576015248,
+      "image_download_sha256": "8457f162621138866361a3fd8b70e36142d15f6a7b3f7882587cf350d4dd10ce",
+      "devices": ["pi5-64bit", "pi4-64bit", "pi3-64bit", "pi02w-64bit"],
+      "init_format": "cloudinit-rpi"
+    }
+  ]
+}
