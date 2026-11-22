@@ -26,33 +26,36 @@ download_or_use() {
 
 # Cleanup loop devices and mounts on exit (success or failure)
 cleanup() {
-  echo "Cleaning up..."
+    local exit_code=$?
+    trap - EXIT INT TERM  # Prevent cleanup from running twice
+    set +e
 
-  for m in "$BOOT_MOUNT_MOUNT" "$ROOTFS_MOUNT" "$OVERLAY_MOUNT"; do
-    if mountpoint -q "$m" 2>/dev/null; then
-      umount "$m" 2>/dev/null || true
+    # Tell libdevmapper not to wait on udevd inside Docker
+    export DM_DISABLE_UDEV=1
+
+    # 1. Guard against empty WORKDIR so we never unmount /dev
+    if [[ -n "${WORKDIR:-}" && -d "${WORKDIR}" ]]; then
+        mount | grep -F " ${WORKDIR}" | awk '{print $3}' | sort -r | xargs -r umount -lf
     fi
-  done
 
-  sleep 2
+    # 2. Tear down device-mapper targets and loop devices
+    for dev in "${BLANK_LOOP:-}" "${RECOVERY_LOOP:-}" "${MAIN_LOOP:-}"; do
+        if [[ -n "$dev" ]]; then
+            base=$(basename "$dev")
+            kpartx -d "$dev" 2>/dev/null || true
 
-  losetup -a | grep -E '\.(restore|lite|img)$' | cut -d: -f1 | while read -r dev; do
-    kpartx -d "$dev" 2>/dev/null || true
-  done
+            # Remove any lingering kernel DM maps matching loopXp* directly
+            dmsetup ls 2>/dev/null | awk -v prefix="${base}p" '$1 ~ "^"prefix {print $1}' | while read -r map; do
+                dmsetup remove -f --noudevsync "$map" 2>/dev/null || true
+            done
 
-  losetup -a | grep -E '\.(restore|lite|img)$' | cut -d: -f1 | while read -r dev; do
-    losetup -d "$dev" 2>/dev/null || true
-  done
+            losetup -d "$dev" 2>/dev/null || true
+        fi
+    done
 
-  losetup -a | grep -E 'loop[0-9]+' | grep -E '\.(restore|img)$' | cut -d: -f1 | while read -r dev; do
-    umount -l "$dev"* 2>/dev/null || true
-    kpartx -d "$dev" 2>/dev/null || true
-    losetup -d "$dev" 2>/dev/null || true
-  done
-
-  echo "Cleanup complete."
+    exit "$exit_code"
 }
-trap cleanup EXIT
+trap cleanup EXIT INT TERM
 
 # ==================== INSTALL SOFTWARE ====================
 export DEBIAN_FRONTEND=noninteractive
@@ -91,29 +94,25 @@ fi
 # ==================== FIXED PARTITION SIZES ====================
 echo "Using fixed partition sizes..."
 
-# Total image size
-TOTAL_MB=12288
-TOTAL_SECTORS=$((TOTAL_MB * 1024 * 1024 / 512))
-
 # Fixed sizes: P1, P2, P3 are big enough
 P1_SIZE=1048576    # Boot A: 512 MB
 P2_SIZE=1048576    # Boot B: 512 MB
 P3_SIZE=8388608    # Rootfs: 4 GB (big enough for Pi OS + customizations)
+P4_SIZE=524288     # Overlay: 256 MB (auto-expanded by growpart on first boot)
 
-# P4: everything remaining
-P4_SIZE=$((TOTAL_SECTORS - P1_SIZE - P2_SIZE - P3_SIZE))
-IMAGE_MB=$(( (TOTAL_SECTORS * 512 / 4194304) + 1 ))
 
 echo "Partition sizes:"
 echo "  Boot A:   ${P1_SIZE} sectors ($((P1_SIZE * 512 / 1048576)) MB)"
 echo "  Boot B:   ${P2_SIZE} sectors ($((P2_SIZE * 512 / 1048576)) MB)"
 echo "  Rootfs:   ${P3_SIZE} sectors ($((P3_SIZE * 512 / 1048576)) MB)"
-echo "  Overlay:  ${P4_SIZE} sectors ($((P4_SIZE * 512 / 1048576)) MB) (all remaining)"
-echo "Total image size: ~${IMAGE_MB} MB"
+echo "  Overlay:  ${P4_SIZE} sectors ($((P4_SIZE * 512 / 1048576)) MB)"
 
 # ==================== CREATE IMAGE ====================
+TOTAL_SECTORS=$((2048 + P1_SIZE + P2_SIZE + P3_SIZE + P4_SIZE))
+IMAGE_MB=$(( (TOTAL_SECTORS * 512 / 1048576) + 1 ))
 echo "Creating image..."
-dd if=/dev/zero of="${WORKDIR}/${MAIN_OS_BASE}.restore.img" bs=4M count="$IMAGE_MB" status=progress
+dd if=/dev/zero of="${WORKDIR}/${MAIN_OS_BASE}.restore.img" bs=1M count="$IMAGE_MB" status=progress
+
 
 UUID_BASE_ROOT=$(uuidgen)
 PARTUUID=$(tr -dc 'a-f0-9' < /dev/urandom 2>/dev/null | head -c8)
@@ -247,7 +246,7 @@ AUTOFW
 sed -i -r "s|root=PARTUUID=[^ ]+|root=PARTUUID=${ROOTFS_PARTUUID}|g" "${BOOT_A_MOUNT}/cmdline.txt"
 # p2 (boot_b) → with overlay (normal mode)
 sed -i -r "s|root=PARTUUID=[^ ]+|root=PARTUUID=${ROOTFS_PARTUUID}|g" "${BOOT_B_MOUNT}/cmdline.txt"
-sed -i -r "s| rootwait| rootwait overlayroot=device:dev=${OVERLAY_PARTUUID},fstype=ext4,mkfs=0|g" "${BOOT_B_MOUNT}/cmdline.txt"
+sed -i -r "s| rootwait| rootwait overlayroot=device:dev=/dev/disk/by-partuuid/${OVERLAY_PARTUUID},fstype=ext4,mkfs=0 systemd.mask=systemd-remount-fs.service|g" "${BOOT_B_MOUNT}/cmdline.txt"
 # Then replace fsck.repair=yes with fsck.mode=skip (don't fsck read-only root)
 sed -i -r 's|fsck\.repair=yes|fsck.mode=skip|g' "${BOOT_A_MOUNT}/cmdline.txt"
 sed -i -r 's|fsck\.repair=yes|fsck.mode=skip|g' "${BOOT_B_MOUNT}/cmdline.txt"
@@ -260,60 +259,132 @@ proc            /proc   proc  defaults       0  0
 PARTUUID=${BOOT_A_PARTUUID}  ${BOOT_MOUNT}  vfat  defaults       0  2
 EOF
 
-# ---- Cloud-init vendor-data: install overlayroot and copy initramfs to boot_b ----
+# ---- Cloud-init vendor-data: install overlayroot, configure boot_b, and set up tryboot reset ----
 cat > "${BOOT_A_MOUNT}/vendor-data" <<'EOF'
+Content-Type: multipart/mixed; boundary="==PIOPS_BOUNDARY=="
+MIME-Version: 1.0
+
+--==PIOPS_BOUNDARY==
+Content-Type: text/cloud-config; charset="us-ascii"
+
 #cloud-config
-mounts:
-  - ["LABEL=boot_b", "/tmp/boot_b", "vfat", "defaults,rw", "0", "0"]
+# Reboots into boot_b ONLY after scripts-vendor AND user-data's runcmd finish
+power_state:
+  delay: now
+  mode: reboot
+  message: "PiOpsOS first-boot provisioning complete; switching to boot_b"
+  timeout: 30
+  condition: test -f /run/vendor-switch-slot-b
 
-packages:
-  - overlayroot
+--==PIOPS_BOUNDARY==
+Content-Type: text/x-shellscript; charset="us-ascii"
 
-runcmd:
-  - |-
-    set -x
-    LOG=/var/log/pios-os-debug.log
-    exec >${LOG} 2>&1
-    echo "===== PiOpsOS vendor-data debug at $(date) ====="
-    echo "UID: $(id)"
-    echo "CWD: $(pwd)"
-    echo "mounts from /proc/mounts:"
-    grep /tmp/boot_b /proc/mounts || echo "boot_b NOT MOUNTED"
-    echo ""
-    echo "ls -la /boot/firmware/:"
-    ls -la /boot/firmware/ || echo "/boot/firmware does not exist"
-    echo ""
-    echo "find /boot/firmware -name 'initramfs*':"
-    find /boot/firmware -name 'initramfs*' -type f 2>&1 || echo "find failed"
-    echo ""
-    echo "mkdir -p /tmp/boot_b"
-    mkdir -p /tmp/boot_b
-    echo ""
-    echo "cp results:"
-    find /boot/firmware -name 'initramfs*' -type f -exec cp -v {} /tmp/boot_b/ \; 2>&1
-    echo ""
-    echo "Contents of /tmp/boot_b after copy:"
-    ls -la /tmp/boot_b/ || echo "/tmp/boot_b does not exist"
-    echo ""
-    echo "===== Done ====="
+#!/bin/bash
+set -euxo pipefail
+
+# Guard: do nothing if already booted into an active overlayroot
+if findmnt -n -o FSTYPE / | grep -qx "overlay"; then
+  exit 0
+fi
+
+# 1. Resolve live partition devices by udev label (immune to stale /etc/blkid.tab cache)
+DEV_BOOT_B=$(readlink -f /dev/disk/by-label/boot_b)
+DEV_OVERLAY=$(readlink -f /dev/disk/by-label/overlay)
+
+BOOT_B_PARTUUID=$(lsblk -no PARTUUID "$DEV_BOOT_B")
+OVERLAY_PARTUUID=$(lsblk -no PARTUUID "$DEV_OVERLAY")
+
+# 2. Install overlayroot and cloud-guest-utils (growpart), ignoring pre-NTP clock skew
+echo "Installing overlayroot:"
+DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=120 -o Acquire::Check-Date=false update
+DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=120 install -y overlayroot cloud-guest-utils
+
+
+# 3. Mount boot_b temporarily, copy initramfs, and unmount cleanly
+mkdir -p /mnt/boot_b
+mount -t vfat -o rw "$DEV_BOOT_B" /mnt/boot_b
+
+echo "cp results:"
+find /boot/firmware -maxdepth 1 -name 'initramfs*' -type f -exec cp -v {} /mnt/boot_b/ \;
+
+umount /mnt/boot_b
+rmdir /mnt/boot_b
+
+# 4. Expand Partition 4 (overlay) to fill the remainder of the drive
+DISK_DEV="/dev/$(lsblk -no PKNAME "$DEV_OVERLAY")"
+PART_NUM=$(cat "/sys/class/block/$(basename "$DEV_OVERLAY")/partition")
+
+rc=0
+growpart "$DISK_DEV" "$PART_NUM" || rc=$?
+[ "$rc" -eq 0 ] || [ "$rc" -eq 1 ]
+udevadm settle --timeout=10
+
+# 5. Write unified reset-overlay.sh on boot_a (kept out of shared rootfs)
+cat > /boot/firmware/reset-overlay.sh <<RESET
+#!/bin/sh
+set -eux
+
+MODE="\${1:-}"
+TRYBOOT_FILE="/proc/device-tree/chosen/bootloader/tryboot"
+BOOT_B_PARTUUID="${BOOT_B_PARTUUID}"
+PART_OVERLAY="/dev/disk/by-partuuid/${OVERLAY_PARTUUID}"
+
+IS_TRYBOOT="0"
+if [ -r "\$TRYBOOT_FILE" ] && [ "\$(od -An -tu4 --endian=big "\$TRYBOOT_FILE" | tr -d ' \n')" = "1" ]; then
+  IS_TRYBOOT="1"
+fi
+
+if [ "\$MODE" = "--init" ] || [ "\$IS_TRYBOOT" = "1" ]; then
+  udevadm settle --timeout=10
+
+  # Format Partition 4 (overlay) cleanly as ext4
+  mkfs.ext4 -F -L overlay "\$PART_OVERLAY"
+
+  # Override boot-firmware.mount via systemd drop-in in Partition 4's overlay upperdir only
+  mkdir -p /mnt/overlay
+  mount "\$PART_OVERLAY" /mnt/overlay
+  mkdir -p /mnt/overlay/overlay/etc/systemd/system/boot-firmware.mount.d
+  cat > /mnt/overlay/overlay/etc/systemd/system/boot-firmware.mount.d/override.conf <<DROPIN
+[Mount]
+What=/dev/disk/by-partuuid/\${BOOT_B_PARTUUID}
+DROPIN
+  umount /mnt/overlay
+  rmdir /mnt/overlay
+
+  if [ "\$IS_TRYBOOT" = "1" ]; then
+    systemctl --no-block reboot
+  fi
+fi
+RESET
+
+# 6. Wire reset-overlay.sh into boot_a/cmdline.txt and configure autoboot.txt
+if ! grep -q "systemd.run=" /boot/firmware/cmdline.txt; then
+  sed -i 's|$| systemd.run="/bin/sh /boot/firmware/reset-overlay.sh" systemd.run_success_action=none systemd.run_failure_action=none systemd.wants=kernel-command-line.service|' /boot/firmware/cmdline.txt
+fi
+
+cat > /boot/firmware/autoboot.txt <<'AUTOBOOT'
+[all]
+tryboot_a_b=1
+boot_partition=2
+
+[tryboot]
+boot_partition=1
+AUTOBOOT
+
+# 7. Run initial Partition 4 format & overlay fstab update (IS_TRYBOOT=0, so cloud-init handles reboot)
+/bin/sh /boot/firmware/reset-overlay.sh --init
+sync
+
+# Uncomment for production auto-reboot into boot_b after first-boot provisioning completes:
+touch /run/vendor-switch-slot-b
+
+--==PIOPS_BOUNDARY==--
 EOF
 echo "Vendor-data written to ${BOOT_A_MOUNT}/vendor-data"
 
 # ---- Copy helper scripts to boot A partition ----
-cp custom.toml               "${BOOT_A_MOUNT}/custom.toml"
-cp boot_to_recovery          "${BOOT_A_MOUNT}/"
-cp boot_to_root              "${BOOT_A_MOUNT}/"
-cp restore_root              "${BOOT_A_MOUNT}/"
-cp check_restore_gpio.py     "${BOOT_A_MOUNT}/"
+cp boot_to_recovery          "${BOOT_B_MOUNT}/"
 
-
-# ---- Backup firstrun.sh for recovery (raspberrypi-sys-mods) ----
-if [ -f "${ROOTFS_MOUNT}/usr/lib/raspberrypi-sys-mods/firstboot" ]; then
-  sed -i "/^mount \\/boot\\$/a cp /${BOOT_MOUNT}/firstrun.sh /${BOOT_MOUNT}/firstrun.bak" \
-    "${ROOTFS_MOUNT}/usr/lib/raspberrypi-sys-mods/firstboot"
-  sed -i "/^mount \\\"\$FWLOC\\\" -o rw\\$/a cp /${BOOT_MOUNT}/firstrun.sh /${BOOT_MOUNT}/firstrun.bak" \
-    "${ROOTFS_MOUNT}/usr/lib/raspberrypi-sys-mods/firstboot"
-fi
 
 # ---- Cleanup mounts ----
 echo "Unmounting..."
