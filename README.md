@@ -1,6 +1,6 @@
 # PiOpsOS
 
-An always resettable Operationg System based on respios. There are two flavors, one desktop version and one server version. Idea from [MagPi](https://magpi.raspberrypi.com/articles/raspberry-pi-recovery-partition) code manly copied from PJ Evans [github repo]https://github.com/mrpjevans/raspbian_restore).
+An always resettable Operationg System based on respios. Idea from [MagPi](https://magpi.raspberrypi.com/articles/raspberry-pi-recovery-partition) code manly copied from PJ Evans [github repo]https://github.com/mrpjevans/raspbian_restore).
 
 ## Purpose
 This OS is the foundation of PiOps (applying enterprise level DevOps principles to the raspberry pi). This means in the first place to be able to setup raspberry Pis follwoing IAC (Infrastructure as Code) principles. This is very unconvenient if you always need to reimage your SD-Card, as soon as you want to retest your IAC Scripts. Exaclty here is, where PiOpsOS joins the game.
@@ -25,8 +25,7 @@ To only switch between booting to recovery partition and normal root partition u
 
 ## Build
 1. checkout repo
-2a. ```docker run -t -v /dev:/dev -v $(pwd):/epicPiOS --privileged ubuntu:focal /bin/bash -c 'cd epicPiOS; ./epic-server-answers | ./create_epicPiOS'```
-2b. ```docker run -t -v /dev:/dev -v $(pwd):/epicPiOS --privileged ubuntu:focal /bin/bash -c 'cd epicPiOS; ./epic-desktop-answers | ./create_epicPiOS'```
+2. ```docker run -t -v /dev:/dev -v $(pwd):/epicPiOS --privileged ubuntu:focal /bin/bash -c 'cd epicPiOS; ./epic-server-answers | ./create_epicPiOS'```
 
 resulting image is then stored in ./tmp
 
