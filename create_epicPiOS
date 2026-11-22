@@ -259,6 +259,14 @@ proc            /proc   proc  defaults       0  0
 PARTUUID=${BOOT_A_PARTUUID}  ${BOOT_MOUNT}  vfat  defaults       0  2
 EOF
 
+# ---- prevent ssh service to start during firstboot customisation phase ----
+mkdir -p "${ROOTFS_MOUNT}/etc/systemd/system/ssh.service.d"
+cat > "${ROOTFS_MOUNT}/etc/systemd/system/ssh.service.d/defer-until-overlay.conf" <<'EOF'
+[Unit]
+Description=Defer SSH until overlayroot is active on boot_b
+ConditionPathIsMountPoint=/media/root-ro
+EOF
+
 # ---- Cloud-init vendor-data: install overlayroot, configure boot_b, and set up tryboot reset ----
 cat > "${BOOT_A_MOUNT}/vendor-data" <<'EOF'
 Content-Type: multipart/mixed; boundary="==PIOPS_BOUNDARY=="
